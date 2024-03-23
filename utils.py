@@ -5,4 +5,9 @@ import numpy as np
 
 def analize_tiles_on_screen(game_wrapper):
     tiles = np.array(game_wrapper)
-    print(tiles)
+
+    flat_area = tiles.flatten()
+    
+    print(flat_area)
+    return(flat_area)
+    #print(tiles)
