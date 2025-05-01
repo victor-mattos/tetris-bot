@@ -3,42 +3,41 @@ import os
 from pyboy.pyboy import *
 
 from settings import ROM_PATH
-from utils import analize_tiles_on_screen
-from tetris_model import TetrisModel
-from tetris_agent import TetrisAgent
+
+import time
+import numpy as np
+from tetris_env import TetrisEnv
+
+from gym.spaces import Discrete, Box
+from utils import preprocess_game_area
+
+env = TetrisEnv(window_type="SDL2")
+
+print("\n[INFO] Reiniciando ambiente...")
+obs = env.reset()
+print(f"[INFO] Observação inicial (shape: {obs.shape}):")
+print(obs)
+
+done = False
+step_count = 0
+
+while not done:
+    action = env.action_space.sample()  # por enquanto, usa ações aleatórias
+    print(f"\n[STEP {step_count}] Ação tomada: {action}")
+
+    obs, reward, done, info = env.step(action)
+
+    print(f"[STEP {step_count}] Recompensa: {reward}")
+    print(f"[STEP {step_count}] Done? {done}")
+    print(f"[STEP {step_count}] Nova observação:")
+    print(obs.reshape(18, 10))  # opcional: para ver como está o tabuleiro
 
 
+    time.sleep(0.1)  # só para conseguir visualizar no terminal com calma
+    step_count += 1
 
-with PyBoy(gamerom_file=ROM_PATH, game_wrapper = True, openai_gym = True) as pyboy:
+print("\n[FIM] Episódio finalizado.")
 
+done = False
+step_count = 0
 
-    input_shape = (180,)
-    num_actions = 6
-
-    game_wrapper = pyboy.game_wrapper()
-
-    observation_type = 'tiles'
-    action_type = 'press'
-
-    env = PyBoyGymEnv(pyboy = pyboy, observation_type=observation_type)
-    tetris_model = TetrisModel(input_shape = input_shape, num_actions = num_actions)
-    agent = TetrisAgent(model = tetris_model)
-
-    epochs = 40000
-
-    #game_wrapper.start_game()
-
-    for epoch in range(epochs):
-        observation = env.reset()
-
-        observation_new = env.step()
-
-        area = game_wrapper.game_area()
-        flat_area = analize_tiles_on_screen(game_wrapper = area)
-
-        observation, reward 
-
-        pass
-
-# # Stop PyBoy
-# pyboy.stop()
