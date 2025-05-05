@@ -1,43 +1,21 @@
 
-import os
-from pyboy.pyboy import *
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_checker import check_env
 
-from settings import ROM_PATH
-
-import time
-import numpy as np
 from tetris_env import TetrisEnv
 
-from gym.spaces import Discrete, Box
-from utils import preprocess_game_area
+# Criar e checar o ambiente
+env = TetrisEnv(window_type="headless")
+# check_env(env, warn=True)  # verifica se está compatível com Gym
 
-env = TetrisEnv(window_type="SDL2")
+# Criar o modelo (usando MLP se obs for vetor/matriz)
+model = PPO("MlpPolicy", env, verbose=1,tensorboard_log="logs/")
 
-print("\n[INFO] Reiniciando ambiente...")
-obs = env.reset()
-print(f"[INFO] Observação inicial (shape: {obs.shape}):")
-print(obs)
+# Treinar
+model.learn(total_timesteps=100_000)
 
-done = False
-step_count = 0
+# Salvar
+model.save("ppo_tetris")
 
-while not done:
-    action = env.action_space.sample()  # por enquanto, usa ações aleatórias
-    print(f"\n[STEP {step_count}] Ação tomada: {action}")
-
-    obs, reward, done, info = env.step(action)
-
-    print(f"[STEP {step_count}] Recompensa: {reward}")
-    print(f"[STEP {step_count}] Done? {done}")
-    print(f"[STEP {step_count}] Nova observação:")
-    print(obs.reshape(18, 10))  # opcional: para ver como está o tabuleiro
-
-
-    time.sleep(0.1)  # só para conseguir visualizar no terminal com calma
-    step_count += 1
-
-print("\n[FIM] Episódio finalizado.")
-
-done = False
-step_count = 0
-
+########################################################################################################################
+########################################################################################################################
