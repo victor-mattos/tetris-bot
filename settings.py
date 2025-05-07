@@ -24,3 +24,10 @@ release_map = {
     WindowEvent.PRESS_BUTTON_A: WindowEvent.RELEASE_BUTTON_A,
     WindowEvent.PRESS_BUTTON_B: WindowEvent.RELEASE_BUTTON_B,
 }
+
+piece_map = {'133':"T",
+             "131":"Q",
+             "129":"IL",
+             "130":"H",
+             "132":"L",
+             "139":"I"}

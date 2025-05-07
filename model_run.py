@@ -17,38 +17,49 @@ from utils import preprocess_game_area
 done = False
 step_count = 0
 
-env = TetrisEnv(window_type="SDL2")
-print("\n[INFO] Reiniciando ambiente...")
-obs,_ = env.reset()
+try:
+    env = TetrisEnv(window_type="SDL2")
+    print("\n[INFO] Reiniciando ambiente...")
+    obs, _ = env.reset()
 
-# Carrega o modelo treinado
-model = PPO.load("ppo_tetris")
+    # Carrega o modelo treinado
+    model = PPO.load("ppo_tetris")
 
-reward_sum =0
-aux_list = []
-while not done:
+    reward_sum = 0
+    aux_list = []
+    
+    while not done:
+        # Ensure the game is running
+        if not env.pyboy.tick():
+            print("[ERROR] Game emulator stopped unexpectedly")
+            break
 
+        # Get action from model
+        action, _ = model.predict(obs, deterministic=True)
+        print(f"\n[STEP {step_count}] Ação tomada: {action}")
 
-    # print(f"[INFO] Observação inicial (shape: {obs.shape}):")
-    # print(obs)
+        # Execute action
+        obs, reward, done, _, info = env.step(int(action))
+        reward_sum += reward
+        aux_list.append(reward_sum)
+        
+        print(f"[STEP {step_count}] Recompensa: {reward}")
+        print(f"[STEP {step_count}] Done? {done}")
+        print(f"[STEP {step_count}] Nova observação:")
+        print(np.array(env.game_wrapper.game_area()).reshape(18, 10))
 
-    # action = env.action_space.sample()  # por enquanto, usa ações aleatórias
-    action, _ = model.predict(obs, deterministic=True)
-    print(f"\n[STEP {step_count}] Ação tomada: {action}")
+        # Small delay to make the game visible
+        time.sleep(0.1)
+        step_count += 1
 
-    obs, reward, done, _,info = env.step(int(action))
-    reward_sum += reward
-    aux_list.append(reward_sum)
-    print(f"[STEP {step_count}] Recompensa: {reward}")
-    print(f"[STEP {step_count}] Done? {done}")
-    print(f"[STEP {step_count}] Nova observação:")
-    # print(obs.reshape(18, 10))  # opcional: para ver como está o tabuleiro
+    print("\n[FIM] Episódio finalizado.")
 
-
-    time.sleep(0.1)  # só para conseguir visualizar no terminal com calma
-    step_count += 1
-
-print("\n[FIM] Episódio finalizado.")
+except Exception as e:
+    print(f"[ERROR] An error occurred: {str(e)}")
+finally:
+    # Clean up
+    if 'env' in locals():
+        env.pyboy.stop()
 
 done = False
 step_count = 0
