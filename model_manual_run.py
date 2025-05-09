@@ -39,7 +39,7 @@ with PyBoy(gamerom_file=ROM_PATH, game_wrapper = True, openai_gym = True) as pyb
             action = 5
 
         # Executa a ação
-        obs, reward, done, _, info = env.step(action)
+        obs, reward, done, _, info = env.manual_step(action)
 
 
         # Lê nova observação

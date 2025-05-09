@@ -32,10 +32,12 @@ class TetrisEnv(gym.Env):
         for _ in range(5):
             self.pyboy.tick()
 
+        self.action_space = Discrete(10 * 4)  # 10 posições finais × 4 rotações
+
 
         self.score = 0
         self.last_score = 0
-
+        self.step_count = 0
 
         self.memory_size = 3
         self.area_history = deque(maxlen=self.memory_size)
@@ -51,9 +53,13 @@ class TetrisEnv(gym.Env):
 
 
     def reset(self, seed=None, options=None):
+        import gc
+        gc.collect()
+
+
         super().reset(seed=seed)  # Call parent's reset to set the seed
         self.pyboy.stop()
-        self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
+        self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True,plugins=[])
         self.game_wrapper = self.pyboy.game_wrapper()
         self.game_wrapper.start_game()
 
@@ -111,28 +117,84 @@ class TetrisEnv(gym.Env):
         # Peça ainda visível, mas não é nova
         return False
 
-
-
-
     def step(self, action):
+
+       # Atualiza observação
+        area = self.game_wrapper.game_area()
+        tiles = np.array(area)
+        self.update_current_gamearea()
+        piece_in_play = self.analize_piece_in_play(area = tiles)
+        done = self.game_wrapper.game_over()
+        # Define ações compostas: mover até a coluna X com rotação Y
+        target_col = action // 4
+        num_rotations = action % 4
+
+        # Gira a peça
+        for _ in range(num_rotations):
+            self.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+            self.pyboy.tick()
+
+        # Obtem posição atual da peça (assuma central, ou pode tentar detectar)
+        # Por simplicidade, vamos assumir que ela começa no centro (coluna 4)
+        current_col = 4
+        delta = target_col - current_col
+        key = WindowEvent.PRESS_ARROW_RIGHT if delta > 0 else WindowEvent.PRESS_ARROW_LEFT
+
+        for _ in range(abs(delta)):
+            self.pyboy.send_input(key)
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT if delta > 0 else WindowEvent.RELEASE_ARROW_LEFT)
+            self.pyboy.tick()
+
+        # Derruba a peça
+        # Avança alguns frames para a peça assentar
+        # for _ in range(5):
+        
+        while not piece_in_play and not done:
+
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
+            
+
+            game_area = self.game_wrapper.game_area()
+            tiles = np.array(game_area)
+            piece_in_play = self.analize_piece_in_play(area = tiles)
+            done = self.game_wrapper.game_over()
+
+        obs = preprocess_game_area(tiles).flatten().astype(np.float32)
+
+        
+        reward = -100.0 if done else self.calc_reward(piece_in_play = piece_in_play)
+
+        self.step_count += 1
+        return obs, reward, done, False, {}
+
+
+
+    def manual_step(self, action):
 
         # Mapeamento da ação para teclas do Game Boy
         from settings import action_map, release_map
 
-        # Envia o input correspondente
         press_event = action_map[action]
-        self.pyboy.send_input(press_event)
-
-        # Avança alguns frames para a ação surtir efeito
-        # for _ in range(10):
-        self.pyboy.tick()
-
-        # Libera a tecla pressionada (simula toque curto)
         release_event = release_map[press_event]
-        self.pyboy.send_input(release_event)
-        # self.pyboy.button(press_event)
 
-        # Lê nova observação
+        # Aperta a tecla
+        self.pyboy.send_input(press_event)
+        self.pyboy.tick()  # apenas 1 frame
+        # Solta a tecla rapidamente
+        self.pyboy.send_input(release_event)
+        self.pyboy.tick()  # mais 1 frame para processar o release
+
+        # Avança alguns frames apenas para o jogo "mostrar" a mudança, sem delay excessivo
+        for _ in range(3):
+            self.pyboy.tick()
+
+        # Leitura do estado atual do jogo
         area = self.game_wrapper.game_area()
         tiles = np.array(area)
 
@@ -156,6 +218,7 @@ class TetrisEnv(gym.Env):
  
         info = {}
         truncated = False
+        self.step_count += 1
         return obs, reward, done, truncated,info
     
     ###################################################################################
@@ -293,18 +356,46 @@ class TetrisEnv(gym.Env):
 
         return total_score
     
+    def reward_safe_positioning(self, mobile_area: np.ndarray, fixed_area: np.ndarray) -> float:
+        """
+        Recompensa se a peça móvel estiver posicionada acima de colunas com altura baixa.
+        """
+        cols_with_piece = np.any(mobile_area == 1, axis=0)  # shape (10,) → True/False por coluna
+        safe_cols = np.where(cols_with_piece)[0]  # Índices das colunas onde a peça está
 
+        if len(safe_cols) == 0:
+            return 0.0  # Nenhuma peça em queda
+
+        total_score = 0.0
+        max_possible_height = mobile_area.shape[0]  # geralmente 18
+
+        for col in safe_cols:
+            # Calcula a altura da pilha fixa nessa coluna
+            for row in range(fixed_area.shape[0]):
+                if fixed_area[row, col] == 1:
+                    height = fixed_area.shape[0] - row
+                    break
+            else:
+                height = 0  # coluna vazia
+
+            normalized_height = height / max_possible_height
+            if normalized_height < 0.5:
+                reward = (1 - normalized_height) * 0.1  # recompensa leve e proporcional
+                total_score += reward
+
+        avg_reward = total_score / len(safe_cols)
+        return avg_reward
 
 
     def calc_reward(self, piece_in_play: bool):
 
         # Atualiza a área de jogo
-        self.update_current_gamearea()
-
+        
+        new_fixed_gamearea = self.get_fixed_gamearea()
 
         if piece_in_play:
             # Gera novo fixed_gamearea, mas ainda não adiciona ao histórico
-            new_fixed_gamearea = self.get_fixed_gamearea()
+            
 
             if len(self.fixed_gamearea_history) >= self.memory_size:
                 old_fixed_gamearea = self.fixed_gamearea_history[-1]
@@ -340,14 +431,14 @@ class TetrisEnv(gym.Env):
 
             lower_pieces_reward = self.calc_lower_pieces_reward(area = piece_position)*2
 
-            print("######## APLICANDO PENALIDADES ############")
-            print(f"Penalidade: {penalty}")
-            print(f"Altura: {max_height_after}")
-            print(f"Buracos Antes: {holes_before}")
-            print(f"Buracos Depois: {holes_after}")
-            print(f"Buracos Diff {holes_diff}")
-            print(f"Lower Pieces Reward: {lower_pieces_reward}")
-            print("######## FIM DA PENALIDADE ############")
+            # print("######## APLICANDO PENALIDADES ############")
+            # print(f"Penalidade: {penalty}")
+            # print(f"Altura: {max_height_after}")
+            # print(f"Buracos Antes: {holes_before}")
+            # print(f"Buracos Depois: {holes_after}")
+            # print(f"Buracos Diff {holes_diff}")
+            # print(f"Lower Pieces Reward: {lower_pieces_reward}")
+            # print("######## FIM DA PENALIDADE ############")
 
             
 
@@ -358,7 +449,11 @@ class TetrisEnv(gym.Env):
             lower_pieces_reward = 0
         
 
+        # Piece position while in play
+        mobile_area = self.get_mobile_gamearea()
 
+        piece_position_reward = self.reward_safe_positioning(mobile_area = mobile_area, fixed_area = new_fixed_gamearea)
+        
         # Score
         last_score = self.score
         self.update_current_score()
@@ -370,22 +465,23 @@ class TetrisEnv(gym.Env):
             score_reward = score_diff * 100
 
         # Sobreviver
-        survival_reward = 0.01
+        survival_reward = 1/(1+self.step_count)
 
         # Penalidades
-        reward = score_reward + survival_reward + lower_pieces_reward
+        reward = score_reward + survival_reward + lower_pieces_reward + piece_position_reward
         
 
         total_reward = reward + penalty
 
+        total_reward = total_reward/100
 
-        reward_dict = {"hole_penalty":hole_penalty,
-                       "height_penalty":height_penalty,
-                       "lower_piece_reward":lower_pieces_reward,
-                       "score_reward":score_reward,
-                       "survival_reward":survival_reward,
-                       }
-        self.applied_rewards.append(reward_dict)
+        # reward_dict = {"hole_penalty":hole_penalty,
+        #                "height_penalty":height_penalty,
+        #                "lower_piece_reward":lower_pieces_reward,
+        #                "score_reward":score_reward,
+        #                "survival_reward":survival_reward,
+        #                }
+        # self.applied_rewards.append(reward_dict)
 
         return total_reward
         
