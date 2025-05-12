@@ -52,3 +52,7 @@ print("\n[FIM] Episódio finalizado.")
 
 done = False
 step_count = 0
+
+df = pd.DataFrame(env.applied_rewards)
+df['total'] = df.sum(axis = 1)
+print(df)

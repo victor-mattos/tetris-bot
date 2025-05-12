@@ -29,8 +29,8 @@ with PyBoy(gamerom_file=ROM_PATH, game_wrapper = True, openai_gym = True) as pyb
     obs, _ = env.reset()
     game_wrapper = pyboy.game_wrapper()
     game_wrapper.start_game()
-
-    while not pyboy.tick():
+    done = False
+    while not done:
         action = input()
 
         try:
@@ -52,7 +52,10 @@ with PyBoy(gamerom_file=ROM_PATH, game_wrapper = True, openai_gym = True) as pyb
         if piece_in_play:
             env.calc_reward(piece_in_play=piece_in_play)
 
+        print(env.applied_rewards[-1])
         
         step_count += 1
 
 print("\n[FIM] Episódio encerrado.")
+import pandas as pd
+print(pd.DataFrame(env.applied_rewards))

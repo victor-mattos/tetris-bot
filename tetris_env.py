@@ -56,10 +56,13 @@ class TetrisEnv(gym.Env):
         import gc
         gc.collect()
 
+        self.score = 0
+        self.area_history = deque(maxlen=self.memory_size)
+        self.fixed_gamearea_history = deque(maxlen=self.memory_size)
 
         super().reset(seed=seed)  # Call parent's reset to set the seed
         self.pyboy.stop()
-        self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True,plugins=[])
+        self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
         self.game_wrapper = self.pyboy.game_wrapper()
         self.game_wrapper.start_game()
 
@@ -123,6 +126,7 @@ class TetrisEnv(gym.Env):
         area = self.game_wrapper.game_area()
         tiles = np.array(area)
         self.update_current_gamearea()
+
         piece_in_play = self.analize_piece_in_play(area = tiles)
         done = self.game_wrapper.game_over()
         # Define ações compostas: mover até a coluna X com rotação Y
@@ -166,10 +170,11 @@ class TetrisEnv(gym.Env):
             done = self.game_wrapper.game_over()
 
         obs = preprocess_game_area(tiles).flatten().astype(np.float32)
+        self.update_current_fixed_gamearea()
+        done = self.game_wrapper.game_over()
 
-        
         reward = -100.0 if done else self.calc_reward(piece_in_play = piece_in_play)
-
+        
         self.step_count += 1
         return obs, reward, done, False, {}
 
@@ -179,6 +184,8 @@ class TetrisEnv(gym.Env):
 
         # Mapeamento da ação para teclas do Game Boy
         from settings import action_map, release_map
+
+        self.update_current_gamearea()
 
         press_event = action_map[action]
         release_event = release_map[press_event]
@@ -207,6 +214,8 @@ class TetrisEnv(gym.Env):
         # Preprocessa a área do jogo
         obs = preprocess_game_area(tiles)
         obs = obs.flatten().astype(np.float32)
+
+        self.update_current_fixed_gamearea()
 
         # Recompensa simples: sobreviveu = 0.1, fim do jogo = -1.0
         if self.game_wrapper.game_over():
@@ -344,145 +353,164 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-    def calc_lower_pieces_reward(self, area: np.ndarray) -> float:
+    def calc_lower_pieces_reward(self) -> float:
 
-        blocks_in_rows = np.sum(area, axis=1)
-        # multipliers = np.power(10, np.arange(18))/10e8
-        multipliers = np.array([(2**n)/2**16 for n in range(18)])*10
-
-        weighted_scores = blocks_in_rows * multipliers
-
-        total_score = np.sum(weighted_scores)
-
-        return total_score
-    
-    def reward_safe_positioning(self, mobile_area: np.ndarray, fixed_area: np.ndarray) -> float:
-        """
-        Recompensa se a peça móvel estiver posicionada acima de colunas com altura baixa.
-        """
-        cols_with_piece = np.any(mobile_area == 1, axis=0)  # shape (10,) → True/False por coluna
-        safe_cols = np.where(cols_with_piece)[0]  # Índices das colunas onde a peça está
-
-        if len(safe_cols) == 0:
-            return 0.0  # Nenhuma peça em queda
-
-        total_score = 0.0
-        max_possible_height = mobile_area.shape[0]  # geralmente 18
-
-        for col in safe_cols:
-            # Calcula a altura da pilha fixa nessa coluna
-            for row in range(fixed_area.shape[0]):
-                if fixed_area[row, col] == 1:
-                    height = fixed_area.shape[0] - row
-                    break
-            else:
-                height = 0  # coluna vazia
-
-            normalized_height = height / max_possible_height
-            if normalized_height < 0.5:
-                reward = (1 - normalized_height) * 0.1  # recompensa leve e proporcional
-                total_score += reward
-
-        avg_reward = total_score / len(safe_cols)
-        return avg_reward
-
-
-    def calc_reward(self, piece_in_play: bool):
-
-        # Atualiza a área de jogo
-        
-        new_fixed_gamearea = self.get_fixed_gamearea()
-
-        if piece_in_play:
-            # Gera novo fixed_gamearea, mas ainda não adiciona ao histórico
+               # Verifica se tem mais de uma peça em jogo
+        if len(self.fixed_gamearea_history) >= 2:
             
+            old_fixed_gamearea = self.fixed_gamearea_history[-2]
+            new_fixed_gamearea = self.fixed_gamearea_history[-1] 
+            
+            area = new_fixed_gamearea - old_fixed_gamearea
 
-            if len(self.fixed_gamearea_history) >= self.memory_size:
-                old_fixed_gamearea = self.fixed_gamearea_history[-1]
+            blocks_in_rows = np.sum(area, axis=1)
+            # multipliers = np.power(10, np.arange(18))/10e8
+            multipliers = np.array([(2**n)/2**17 for n in range(18)])/100
+
+            weighted_scores = blocks_in_rows * multipliers
+
+            reward = np.sum(weighted_scores)
+
+        else:
+            reward = 0
+        return reward
+    
+    def calc_cleaning_line_progress_reward(self):
+
+        # Verifica se tem mais de uma peça em jogo
+        if len(self.fixed_gamearea_history) >= 2:
+            
+            old_fixed_gamearea = self.fixed_gamearea_history[-2]
+            new_fixed_gamearea = self.fixed_gamearea_history[-1] 
+
+            # Soma o número de blocos (1s) por linha
+            old_line_counts = np.sum(old_fixed_gamearea, axis=1)
+            new_line_counts = np.sum(new_fixed_gamearea, axis=1)
+
+            # Calcula o progresso por linha
+            line_diff = new_line_counts - old_line_counts
+
+            active_lines = old_line_counts > 0
+
+            # Aplica a máscara: só considerar progresso em linhas ativas
+            relevant_diffs = line_diff * active_lines
+
+            # Só mantém os aumentos (progresso real)
+            relevant_diffs = relevant_diffs[relevant_diffs > 0]
+
+            # Soma total do progresso (ou aplique fator de peso aqui)
+            reward = np.sum(relevant_diffs)/10
+
+            return reward  # ou reward * peso
+        else:
+            return 0.0
+
+
+    def calc_height_penalty(self):
+        
+        # Verifica se tem mais de uma peça em jogo
+        if len(self.fixed_gamearea_history) >= 2:
+            
+            old_fixed_gamearea = self.fixed_gamearea_history[-2]
+            new_fixed_gamearea = self.fixed_gamearea_history[-1]   
+
+            max_height_before = self.count_max_height(area = old_fixed_gamearea)
+            max_height_after = self.count_max_height(area = new_fixed_gamearea)
+            max_possible_height = new_fixed_gamearea.shape[0]
+
+            if max_height_after > max_height_before:
+                normalized_height = max_height_after / max_possible_height  # entre 0 e 1
+                height_penalty = - self.height_penalty(normalized_height)*10
 
             else:
-                old_fixed_gamearea = new_fixed_gamearea.copy()
+                height_penalty = 0
+        
+        else:
+            height_penalty = 0
+        
+        return height_penalty
 
-            # Adiciona ao histórico após a comparação
-            self.fixed_gamearea_history.append(new_fixed_gamearea)
+    def calc_hole_penalty(self):
 
-            # Buracos
+        # Verifica se tem mais de uma peça em jogo
+        if len(self.fixed_gamearea_history) >= 2:
+            
+            old_fixed_gamearea = self.fixed_gamearea_history[-2]
+            new_fixed_gamearea = self.fixed_gamearea_history[-1]   
+
+         
             holes_before = self.count_holes(area = old_fixed_gamearea)
             holes_after = self.count_holes(area = new_fixed_gamearea)
 
             holes_diff = holes_after - holes_before
-            hole_penalty = -holes_diff * 2 
 
-            # Altura
-            max_height_before = self.count_max_height(area = old_fixed_gamearea)
-            max_height_after = self.count_max_height(area = new_fixed_gamearea)
-
-
-            max_possible_height = new_fixed_gamearea.shape[0]
-            normalized_height = max_height_after / max_possible_height  # entre 0 e 1
-
-            height_penalty = - self.height_penalty(normalized_height)*10
- 
-
-            penalty = hole_penalty + height_penalty
-
-            # lower_pieces_reward
-            piece_position = new_fixed_gamearea - old_fixed_gamearea
-
-            lower_pieces_reward = self.calc_lower_pieces_reward(area = piece_position)*2
-
-            # print("######## APLICANDO PENALIDADES ############")
-            # print(f"Penalidade: {penalty}")
-            # print(f"Altura: {max_height_after}")
-            # print(f"Buracos Antes: {holes_before}")
-            # print(f"Buracos Depois: {holes_after}")
-            # print(f"Buracos Diff {holes_diff}")
-            # print(f"Lower Pieces Reward: {lower_pieces_reward}")
-            # print("######## FIM DA PENALIDADE ############")
-
-            
-
+            if holes_diff>0:
+                hole_penalty = -holes_diff * 2 
+            else:
+                hole_penalty = 0
         else:
-            penalty = 0
-            hole_penalty=0
-            height_penalty=0
-            lower_pieces_reward = 0
+            hole_penalty = 0
         
-
-        # Piece position while in play
-        mobile_area = self.get_mobile_gamearea()
-
-        piece_position_reward = self.reward_safe_positioning(mobile_area = mobile_area, fixed_area = new_fixed_gamearea)
-        
+        return hole_penalty 
+            
+            
+    def calc_score_reward(self):
         # Score
         last_score = self.score
         self.update_current_score()
         score_diff = self.score - last_score
+
         if score_diff == 0:
             score_reward = 0.0
 
         else:
-            score_reward = score_diff * 100
+            score_reward = score_diff
+
+        return score_reward/10
+    
+    def calc_reward(self, piece_in_play: bool):
+
+        # Atualiza a área de jogo
+        if piece_in_play:
+            
+            height_penalty = self.calc_height_penalty()
+            hole_penalty = self.calc_hole_penalty()/10
+           
+            penalty = hole_penalty + height_penalty
+        else:
+            penalty = 0
+            hole_penalty=0
+            height_penalty=0
+            
+               
+        score_reward = self.calc_score_reward()
+        safe_reward = self.calc_lower_pieces_reward()
+
+        if score_reward == 0 and self.count_max_height(self.fixed_gamearea_history[-1]) < 16:
+            clean_line_progress_reward = self.calc_cleaning_line_progress_reward()
+
+        else:
+            clean_line_progress_reward = 0
 
         # Sobreviver
         survival_reward = 1/(1+self.step_count)
 
         # Penalidades
-        reward = score_reward + survival_reward + lower_pieces_reward + piece_position_reward
+        reward = score_reward + survival_reward + clean_line_progress_reward + safe_reward
         
-
         total_reward = reward + penalty
 
         total_reward = total_reward/100
 
-        # reward_dict = {"hole_penalty":hole_penalty,
-        #                "height_penalty":height_penalty,
-        #                "lower_piece_reward":lower_pieces_reward,
-        #                "score_reward":score_reward,
-        #                "survival_reward":survival_reward,
-        #                }
-        # self.applied_rewards.append(reward_dict)
-
+        reward_dict = {"hole_penalty":hole_penalty,
+                       "height_penalty":height_penalty,
+                       "clean_line_progress_reward":clean_line_progress_reward,
+                       "score_reward":score_reward,
+                       "survival_reward":survival_reward,
+                       "safe_reward":safe_reward
+                       }
+        self.applied_rewards.append(reward_dict)
+        # print(f"Score Reward: {total_reward}")
         return total_reward
         
 
