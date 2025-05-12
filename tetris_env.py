@@ -17,6 +17,7 @@ from utils import preprocess_game_area
 
 
 class TetrisEnv(gym.Env):
+
     def __init__(self, window_type: Optional[str] = "headless"):
         super().__init__()
 
@@ -46,8 +47,8 @@ class TetrisEnv(gym.Env):
         self.last_piece_id = None
         self.current_piece_id = None
         self.piece_visible = False
-        self.has_new_piece = False
         self.applied_rewards = []
+
     ###################################################################################
     ###################################################################################
 
@@ -55,11 +56,17 @@ class TetrisEnv(gym.Env):
     def reset(self, seed=None, options=None):
         import gc
         gc.collect()
-
+        
+        self.step_count = 0 
+        self.last_score = 0
         self.score = 0
         self.area_history = deque(maxlen=self.memory_size)
         self.fixed_gamearea_history = deque(maxlen=self.memory_size)
-
+        self.last_piece_id = None
+        self.current_piece_id = None
+        self.piece_visible = False
+        self.applied_rewards = []
+        
         super().reset(seed=seed)  # Call parent's reset to set the seed
         self.pyboy.stop()
         self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
@@ -173,9 +180,10 @@ class TetrisEnv(gym.Env):
         self.update_current_fixed_gamearea()
         done = self.game_wrapper.game_over()
 
-        reward = -100.0 if done else self.calc_reward(piece_in_play = piece_in_play)
+        reward = -20.0 if done else self.calc_reward(piece_in_play = piece_in_play)
         
         self.step_count += 1
+
         return obs, reward, done, False, {}
 
 
@@ -365,7 +373,7 @@ class TetrisEnv(gym.Env):
 
             blocks_in_rows = np.sum(area, axis=1)
             # multipliers = np.power(10, np.arange(18))/10e8
-            multipliers = np.array([(2**n)/2**17 for n in range(18)])/100
+            multipliers = np.array([(2**n)/2**17 for n in range(18)])
 
             weighted_scores = blocks_in_rows * multipliers
 
@@ -399,7 +407,7 @@ class TetrisEnv(gym.Env):
             relevant_diffs = relevant_diffs[relevant_diffs > 0]
 
             # Soma total do progresso (ou aplique fator de peso aqui)
-            reward = np.sum(relevant_diffs)/10
+            reward = reward = np.count_nonzero(relevant_diffs)
 
             return reward  # ou reward * peso
         else:
@@ -420,7 +428,7 @@ class TetrisEnv(gym.Env):
 
             if max_height_after > max_height_before:
                 normalized_height = max_height_after / max_possible_height  # entre 0 e 1
-                height_penalty = - self.height_penalty(normalized_height)*10
+                height_penalty = - self.height_penalty(normalized_height)*2
 
             else:
                 height_penalty = 0
@@ -445,7 +453,7 @@ class TetrisEnv(gym.Env):
             holes_diff = holes_after - holes_before
 
             if holes_diff>0:
-                hole_penalty = -holes_diff * 2 
+                hole_penalty = -holes_diff/2
             else:
                 hole_penalty = 0
         else:
@@ -464,9 +472,9 @@ class TetrisEnv(gym.Env):
             score_reward = 0.0
 
         else:
-            score_reward = score_diff
+            score_reward = score_diff*10
 
-        return score_reward/10
+        return score_reward
     
     def calc_reward(self, piece_in_play: bool):
 
@@ -474,7 +482,7 @@ class TetrisEnv(gym.Env):
         if piece_in_play:
             
             height_penalty = self.calc_height_penalty()
-            hole_penalty = self.calc_hole_penalty()/10
+            hole_penalty = self.calc_hole_penalty()
            
             penalty = hole_penalty + height_penalty
         else:
@@ -493,14 +501,14 @@ class TetrisEnv(gym.Env):
             clean_line_progress_reward = 0
 
         # Sobreviver
-        survival_reward = 1/(1+self.step_count)
-
+        survival_reward = 1# /(1+self.step_count)
+   
         # Penalidades
-        reward = score_reward + survival_reward + clean_line_progress_reward + safe_reward
+        reward = score_reward + survival_reward + safe_reward + clean_line_progress_reward  
         
         total_reward = reward + penalty
 
-        total_reward = total_reward/100
+        total_reward = total_reward
 
         reward_dict = {"hole_penalty":hole_penalty,
                        "height_penalty":height_penalty,

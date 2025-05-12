@@ -10,7 +10,7 @@ import pandas as pd
 
 
 from tetris_env import TetrisEnv
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO,DQN
 from gymnasium.spaces import Discrete, Box
 from utils import preprocess_game_area
 
@@ -23,8 +23,8 @@ print("\n[INFO] Reiniciando ambiente...")
 obs, _ = env.reset()
 
 # Carrega o modelo treinado
-model = PPO.load("ppo_tetris")
-
+# model = PPO.load("ppo_tetris")
+model = DQN.load("ppo_tetris")
 reward_sum = 0
 aux_list = []
 
