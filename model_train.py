@@ -51,7 +51,7 @@ model = DQN(
 )
 
 # Treinar
-model.learn(total_timesteps=100_000)
+model.learn(total_timesteps=15_000)
 
 # Salvar modelo e normalizador
 model.save("dqn_tetris")

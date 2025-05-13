@@ -184,6 +184,8 @@ class TetrisEnv(gym.Env):
         
         self.step_count += 1
 
+        if self.step_count > 1000:
+            done = True
         return obs, reward, done, False, {}
 
 
@@ -316,6 +318,19 @@ class TetrisEnv(gym.Env):
         return processed.astype(np.uint8)
 
 
+    def calc_bumpiness(self, area: np.ndarray) -> float:
+        # 1. Sanitiza: qualquer valor > 0 vira 1 (evita problemas com valores incorretos)
+        area = np.where(area > 0, 1, 0)
+
+        # 2. Calcula altura de cada coluna
+        heights = [area.shape[0] - np.argmax(col[::-1]) if np.any(col) else 0
+                for col in area.T]
+
+        # 3. Diferença de altura entre colunas vizinhas
+        diffs = np.abs(np.diff(heights))
+
+        # 4. Penaliza apenas onde há diferença (bumpiness real)
+        return np.count_nonzero(diffs)
 
 
     def count_holes(self,area: np.ndarray) -> int:
@@ -384,34 +399,56 @@ class TetrisEnv(gym.Env):
         return reward
     
     def calc_cleaning_line_progress_reward(self):
+        # Verifica se tem histórico suficiente
+        if len(self.fixed_gamearea_history) >= 2:
+            old_fixed_gamearea = self.fixed_gamearea_history[-2]
+            new_fixed_gamearea = self.fixed_gamearea_history[-1]
 
-        # Verifica se tem mais de uma peça em jogo
+            # Soma o número de blocos (1s) por linha
+            old_line_counts = np.count_nonzero(old_fixed_gamearea, axis=1)
+            new_line_counts = np.count_nonzero(new_fixed_gamearea, axis=1)
+
+            # Calcula o delta de preenchimento por linha
+            line_diff = new_line_counts - old_line_counts
+
+            # Considera apenas linhas já iniciadas
+            active_lines = old_line_counts > 0
+            relevant_diffs = line_diff * active_lines
+
+            # Garante que só consideramos progresso positivo, e mitiga valores não binários
+            positive_diffs = [diff for diff in relevant_diffs if diff > 0]
+
+            # Conta o número de linhas que tiveram progresso
+            num_lines_with_progress = np.count_nonzero(positive_diffs)*0.25
+
+            # Calcula a recompensa total com peso progressivo
+            weighted_reward = np.sum([np.log2(diff + 1) for diff in positive_diffs])
+
+            # Combina os dois: número de linhas ativas e intensidade do progresso
+            final_reward = num_lines_with_progress + weighted_reward
+
+            return final_reward
+        else:
+            return 0.0
+
+
+    def calc_bumpiness_penalty(self):
+         # Verifica se tem mais de uma peça em jogo
         if len(self.fixed_gamearea_history) >= 2:
             
             old_fixed_gamearea = self.fixed_gamearea_history[-2]
-            new_fixed_gamearea = self.fixed_gamearea_history[-1] 
+            new_fixed_gamearea = self.fixed_gamearea_history[-1]
 
-            # Soma o número de blocos (1s) por linha
-            old_line_counts = np.sum(old_fixed_gamearea, axis=1)
-            new_line_counts = np.sum(new_fixed_gamearea, axis=1)
+            old_bumpiness = self.calc_bumpiness(area = old_fixed_gamearea)
+            new_bumpiness = self.calc_bumpiness(area = new_fixed_gamearea)
 
-            # Calcula o progresso por linha
-            line_diff = new_line_counts - old_line_counts
+            delta_bumpiness = new_bumpiness - old_bumpiness 
+            bumpiness_penalty = -delta_bumpiness * 0.25
 
-            active_lines = old_line_counts > 0
-
-            # Aplica a máscara: só considerar progresso em linhas ativas
-            relevant_diffs = line_diff * active_lines
-
-            # Só mantém os aumentos (progresso real)
-            relevant_diffs = relevant_diffs[relevant_diffs > 0]
-
-            # Soma total do progresso (ou aplique fator de peso aqui)
-            reward = reward = np.count_nonzero(relevant_diffs)
-
-            return reward  # ou reward * peso
         else:
-            return 0.0
+            bumpiness_penalty = 0
+
+        return bumpiness_penalty 
 
 
     def calc_height_penalty(self):
@@ -453,7 +490,7 @@ class TetrisEnv(gym.Env):
             holes_diff = holes_after - holes_before
 
             if holes_diff>0:
-                hole_penalty = -holes_diff/2
+                hole_penalty = -holes_diff
             else:
                 hole_penalty = 0
         else:
@@ -483,13 +520,13 @@ class TetrisEnv(gym.Env):
             
             height_penalty = self.calc_height_penalty()
             hole_penalty = self.calc_hole_penalty()
-           
-            penalty = hole_penalty + height_penalty
+            bumpiness_pentalty = self.calc_bumpiness_penalty()
+            penalty = hole_penalty + height_penalty + bumpiness_pentalty
         else:
             penalty = 0
             hole_penalty=0
             height_penalty=0
-            
+            bumpiness_pentalty = 0
                
         score_reward = self.calc_score_reward()
         safe_reward = self.calc_lower_pieces_reward()
@@ -501,7 +538,7 @@ class TetrisEnv(gym.Env):
             clean_line_progress_reward = 0
 
         # Sobreviver
-        survival_reward = 1# /(1+self.step_count)
+        survival_reward = 1
    
         # Penalidades
         reward = score_reward + survival_reward + safe_reward + clean_line_progress_reward  
@@ -512,10 +549,12 @@ class TetrisEnv(gym.Env):
 
         reward_dict = {"hole_penalty":hole_penalty,
                        "height_penalty":height_penalty,
+                       "bumpiness_penalty":bumpiness_pentalty,
                        "clean_line_progress_reward":clean_line_progress_reward,
                        "score_reward":score_reward,
                        "survival_reward":survival_reward,
-                       "safe_reward":safe_reward
+                       "safe_reward":safe_reward,
+                       
                        }
         self.applied_rewards.append(reward_dict)
         # print(f"Score Reward: {total_reward}")

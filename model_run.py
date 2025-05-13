@@ -24,7 +24,7 @@ obs, _ = env.reset()
 
 # Carrega o modelo treinado
 # model = PPO.load("ppo_tetris")
-model = DQN.load("ppo_tetris")
+model = DQN.load("dqn_tetris")
 reward_sum = 0
 aux_list = []
 
