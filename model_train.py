@@ -6,7 +6,7 @@ from stable_baselines3.common.monitor import Monitor
 from tetris_env import TetrisEnv
 
 import os
-
+import torch
 log_dir = "./logs_csv"
 os.makedirs(log_dir, exist_ok=True)
 
@@ -36,23 +36,24 @@ env = DummyVecEnv([make_env])
 model = DQN(
     "MlpPolicy",
     env,
-    learning_rate=2.5e-4,
+    learning_rate=2e-4,
     buffer_size=100_000,              # Tamanho do buffer de replay
-    learning_starts=1_000,            # Passos antes de começar a aprender
+    learning_starts=10_000,            # Passos antes de começar a aprender
     batch_size=256,
     tau=1.0,                          # Fator de soft update (1.0 = update direto)
     gamma=0.99,
     train_freq=1,                     # Frequência de treino
     target_update_interval=1_000,     # Frequência de atualização da rede alvo
-    exploration_fraction=0.3,         # Fração do treinamento com exploração
-    exploration_final_eps=0.05,       # Valor final de epsilon (ε-greedy)
+    exploration_fraction=0.1,         # Fração do treinamento com exploração
+    exploration_final_eps=0.02,       # Valor final de epsilon (ε-greedy)
     verbose=1,
-    tensorboard_log="logs/"
+    tensorboard_log="logs/",
+    device = "cuda"
 )
 
 # Treinar
-model.learn(total_timesteps=15_000)
+model.learn(total_timesteps=500_000)
 
 # Salvar modelo e normalizador
-model.save("dqn_tetris")
+model.save("dqn_tetris_v4")
 # env.save("ppo_tetris_vecnormalize.pkl")

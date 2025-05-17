@@ -13,12 +13,10 @@ from collections import deque
 from settings import ROM_PATH
 from typing import Optional
 
-from utils import preprocess_game_area
-
 
 class TetrisEnv(gym.Env):
 
-    def __init__(self, window_type: Optional[str] = "headless"):
+    def __init__(self, window_type: str = "headless", memory_size: int = 3):
         super().__init__()
 
         self.action_space = Discrete(6)  # 6 ações possíveis
@@ -40,7 +38,7 @@ class TetrisEnv(gym.Env):
         self.last_score = 0
         self.step_count = 0
 
-        self.memory_size = 3
+        self.memory_size = memory_size
         self.area_history = deque(maxlen=self.memory_size)
         self.fixed_gamearea_history = deque(maxlen=self.memory_size)
 
@@ -56,30 +54,34 @@ class TetrisEnv(gym.Env):
     def reset(self, seed=None, options=None):
         import gc
         gc.collect()
-        
-        self.step_count = 0 
+
+        self.step_count = 0
         self.last_score = 0
         self.score = 0
-        self.area_history = deque(maxlen=self.memory_size)
-        self.fixed_gamearea_history = deque(maxlen=self.memory_size)
+        self.area_history.clear()
+        self.fixed_gamearea_history.clear()
         self.last_piece_id = None
         self.current_piece_id = None
         self.piece_visible = False
         self.applied_rewards = []
-        
-        super().reset(seed=seed)  # Call parent's reset to set the seed
-        self.pyboy.stop()
-        self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
-        self.game_wrapper = self.pyboy.game_wrapper()
-        self.game_wrapper.start_game()
+
+        # if hasattr(self, "pyboy") and self.pyboy:
+        #     self.pyboy.stop()
+        #     del self.pyboy
+            
+        self.game_wrapper.reset_game()
+        # self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
+        # self.game_wrapper = self.pyboy.game_wrapper()
+        # self.game_wrapper.start_game()
 
         for _ in range(5):
             self.pyboy.tick()
 
         area = self.game_wrapper.game_area()
         tiles = np.array(area)
-        obs = preprocess_game_area(tiles)
-        return obs, {}  # Return observation and empty info dict
+        obs = self.preprocess_game_area(tiles)
+        gc.collect()
+        return obs, {}
 
     
     ###################################################################################
@@ -92,7 +94,7 @@ class TetrisEnv(gym.Env):
         processed = np.where(area == 47, 0, 1)  # 47 = vazio, qualquer outra coisa vira 1
 
         # Flatten e normaliza como float32
-        # processed = processed.flatten().astype(np.float32)
+        processed = processed.flatten().astype(np.float32)
         
         return processed
     
@@ -176,11 +178,11 @@ class TetrisEnv(gym.Env):
             piece_in_play = self.analize_piece_in_play(area = tiles)
             done = self.game_wrapper.game_over()
 
-        obs = preprocess_game_area(tiles).flatten().astype(np.float32)
+        obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
         self.update_current_fixed_gamearea()
         done = self.game_wrapper.game_over()
 
-        reward = -20.0 if done else self.calc_reward(piece_in_play = piece_in_play)
+        reward = -100.0 if done else self.calc_reward(piece_in_play = piece_in_play)
         
         self.step_count += 1
 
@@ -222,7 +224,7 @@ class TetrisEnv(gym.Env):
         
 
         # Preprocessa a área do jogo
-        obs = preprocess_game_area(tiles)
+        obs = self.preprocess_game_area(tiles)
         obs = obs.flatten().astype(np.float32)
 
         self.update_current_fixed_gamearea()
@@ -312,11 +314,6 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-    def preprocess_game_area(self, area: np.ndarray) -> np.ndarray:
-        """Recebe a matriz da área do jogo e retorna matriz binária 2D (18x10)"""
-        processed = np.where(area == 47, 0, 1)  # 47 = vazio, qualquer outra coisa vira 1
-        return processed.astype(np.uint8)
-
 
     def calc_bumpiness(self, area: np.ndarray) -> float:
         # 1. Sanitiza: qualquer valor > 0 vira 1 (evita problemas com valores incorretos)
@@ -396,6 +393,8 @@ class TetrisEnv(gym.Env):
 
         else:
             reward = 0
+
+        reward = min(reward,6)
         return reward
     
     def calc_cleaning_line_progress_reward(self):
@@ -443,7 +442,7 @@ class TetrisEnv(gym.Env):
             new_bumpiness = self.calc_bumpiness(area = new_fixed_gamearea)
 
             delta_bumpiness = new_bumpiness - old_bumpiness 
-            bumpiness_penalty = -delta_bumpiness * 0.25
+            bumpiness_penalty = -delta_bumpiness 
 
         else:
             bumpiness_penalty = 0
@@ -465,7 +464,7 @@ class TetrisEnv(gym.Env):
 
             if max_height_after > max_height_before:
                 normalized_height = max_height_after / max_possible_height  # entre 0 e 1
-                height_penalty = - self.height_penalty(normalized_height)*2
+                height_penalty = - self.height_penalty(normalized_height)*4
 
             else:
                 height_penalty = 0
@@ -529,16 +528,17 @@ class TetrisEnv(gym.Env):
             bumpiness_pentalty = 0
                
         score_reward = self.calc_score_reward()
-        safe_reward = self.calc_lower_pieces_reward()
+        safe_reward = self.calc_lower_pieces_reward()/max(np.abs(hole_penalty),1)
 
-        if score_reward == 0 and self.count_max_height(self.fixed_gamearea_history[-1]) < 16:
-            clean_line_progress_reward = self.calc_cleaning_line_progress_reward()
+
+        if score_reward == 0:
+            clean_line_progress_reward = self.calc_cleaning_line_progress_reward()/max(np.abs(hole_penalty),1)
 
         else:
             clean_line_progress_reward = 0
 
         # Sobreviver
-        survival_reward = 1
+        survival_reward = self.step_count/10
    
         # Penalidades
         reward = score_reward + survival_reward + safe_reward + clean_line_progress_reward  
