@@ -44,16 +44,15 @@ model = DQN(
     gamma=0.99,
     train_freq=1,                     # Frequência de treino
     target_update_interval=1_000,     # Frequência de atualização da rede alvo
-    exploration_fraction=0.1,         # Fração do treinamento com exploração
-    exploration_final_eps=0.02,       # Valor final de epsilon (ε-greedy)
+    exploration_fraction=0.15,         # Fração do treinamento com exploração
+    exploration_final_eps=0.025,       # Valor final de epsilon (ε-greedy)
     verbose=1,
     tensorboard_log="logs/",
     device = "cuda"
 )
 
 # Treinar
-model.learn(total_timesteps=500_000)
+model.learn(total_timesteps=300_000)
 
 # Salvar modelo e normalizador
-model.save("dqn_tetris_v4")
-# env.save("ppo_tetris_vecnormalize.pkl")
+model.save("dqn_tetris_v5")

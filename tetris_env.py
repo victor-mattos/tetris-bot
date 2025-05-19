@@ -101,42 +101,26 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
     
-
-    def analize_piece_in_play(self, area: np.ndarray) -> bool:
+    def analize_piece_in_play(self) -> bool:
+        """Simplificada: Retorna True se houver QUALQUER bloco na área de spawn."""
         ENTRY_SPACE_START_I = 0
         ENTRY_SPACE_END_I = 2
         ENTRY_SPACE_START_J = 4
         ENTRY_SPACE_END_J = 7
 
+        area = self.get_current_gamearea()
         spawn_center = area[ENTRY_SPACE_START_I:ENTRY_SPACE_END_I, ENTRY_SPACE_START_J:ENTRY_SPACE_END_J]
 
-        diff_values = spawn_center[spawn_center != 47]
-        if diff_values.size == 0:
-            # Sem peça na área de spawn
-            self.piece_visible = False
-            return False
+        # Verifica simplesmente se existe pelo menos um valor não-zero na sub-área
+        return np.any(spawn_center != 0)
 
-        # Há peça visível
-        self.current_piece_id = np.unique(diff_values)[0]  # valor numérico único da peça (ex: 1, 2...)
-        
-        if not self.piece_visible:
-            # A peça **acabou de aparecer**
-            self.piece_visible = True
-            if self.current_piece_id != self.last_piece_id:
-                self.last_piece_id = self.current_piece_id
-                return True  # Nova peça detectada!
-        
-        # Peça ainda visível, mas não é nova
-        return False
-
+    
     def step(self, action):
 
-       # Atualiza observação
-        area = self.game_wrapper.game_area()
-        tiles = np.array(area)
-        self.update_current_gamearea()
-
-        piece_in_play = self.analize_piece_in_play(area = tiles)
+        # Atualiza observação
+        # area = self.game_wrapper.game_area()
+        # tiles = np.array(area)
+        
         done = self.game_wrapper.game_over()
         # Define ações compostas: mover até a coluna X com rotação Y
         target_col = action // 4
@@ -161,28 +145,31 @@ class TetrisEnv(gym.Env):
             self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT if delta > 0 else WindowEvent.RELEASE_ARROW_LEFT)
             self.pyboy.tick()
 
-        # Derruba a peça
-        # Avança alguns frames para a peça assentar
-        # for _ in range(5):
-        
-        while not piece_in_play and not done:
-
+        for _ in range(4):
             self.pyboy.tick()
             self.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
             self.pyboy.tick()
             self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
             
-
-            game_area = self.game_wrapper.game_area()
-            tiles = np.array(game_area)
-            piece_in_play = self.analize_piece_in_play(area = tiles)
+        piece_in_play = self.analize_piece_in_play()       
+        while piece_in_play==False and done==False:
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
+                
+            piece_in_play = self.analize_piece_in_play()
             done = self.game_wrapper.game_over()
 
+        area = self.game_wrapper.game_area()
+        tiles = np.array(area)
         obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
+        
+        self.update_current_gamearea()
         self.update_current_fixed_gamearea()
         done = self.game_wrapper.game_over()
 
-        reward = -100.0 if done else self.calc_reward(piece_in_play = piece_in_play)
+        reward = -100.0 if done else self.calc_reward()
         
         self.step_count += 1
 
@@ -191,56 +178,6 @@ class TetrisEnv(gym.Env):
         return obs, reward, done, False, {}
 
 
-
-    def manual_step(self, action):
-
-        # Mapeamento da ação para teclas do Game Boy
-        from settings import action_map, release_map
-
-        self.update_current_gamearea()
-
-        press_event = action_map[action]
-        release_event = release_map[press_event]
-
-        # Aperta a tecla
-        self.pyboy.send_input(press_event)
-        self.pyboy.tick()  # apenas 1 frame
-        # Solta a tecla rapidamente
-        self.pyboy.send_input(release_event)
-        self.pyboy.tick()  # mais 1 frame para processar o release
-
-        # Avança alguns frames apenas para o jogo "mostrar" a mudança, sem delay excessivo
-        for _ in range(3):
-            self.pyboy.tick()
-
-        # Leitura do estado atual do jogo
-        area = self.game_wrapper.game_area()
-        tiles = np.array(area)
-
-        if len(self.area_history) >= self.memory_size:
-            piece_in_play = self.analize_piece_in_play(area = tiles)
-        else:
-            piece_in_play = False
-        
-
-        # Preprocessa a área do jogo
-        obs = self.preprocess_game_area(tiles)
-        obs = obs.flatten().astype(np.float32)
-
-        self.update_current_fixed_gamearea()
-
-        # Recompensa simples: sobreviveu = 0.1, fim do jogo = -1.0
-        if self.game_wrapper.game_over():
-            reward = -100.0
-            done = True
-        else:
-            reward = self.calc_reward(piece_in_play)
-            done = False
- 
-        info = {}
-        truncated = False
-        self.step_count += 1
-        return obs, reward, done, truncated,info
     
     ###################################################################################
     ###################################################################################
@@ -268,12 +205,17 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-
-    def update_current_gamearea(self):
+    def get_current_gamearea(self)->np.ndarray:
         raw_game_area = self.game_wrapper.game_area()
         tiles = np.array(raw_game_area)
-        self.game_area = self.preprocess_game_area(tiles)  # agora mantemos em 2D (18, 10)
-        self.area_history.append(self.game_area)
+        # self.game_area = self.preprocess_game_area(tiles)  # agora mantemos em 2D (18, 10)
+        game_area = np.where(tiles == 47, 0, 1)
+
+        return game_area
+
+    def update_current_gamearea(self):
+        gamearea = self.get_current_gamearea()
+        self.area_history.append(gamearea)
     
     ###################################################################################
     ###################################################################################
@@ -289,6 +231,10 @@ class TetrisEnv(gym.Env):
 
 
     def get_fixed_gamearea(self) -> np.ndarray:
+        if len(self.area_history) == 0:
+        # Retorna uma matriz vazia (sem peças posicionadas)
+            return np.zeros((18, 10), dtype=np.uint8)
+
         current_game_area = self.area_history[-1]
         fixed_area = np.zeros_like(current_game_area, dtype=np.uint8)
 
@@ -304,31 +250,45 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-    def get_mobile_gamearea(self) -> np.ndarray:
-        current_game_area = self.area_history[-1]  # shape (18, 10)
-        fixed_game_area = self.get_fixed_gamearea()  # shape (18, 10)
-
-        mobile = np.logical_and(current_game_area == 1, fixed_game_area == 0)
-        return mobile.astype(np.uint8)  # shape (18, 10)
-
-    ###################################################################################
-    ###################################################################################
 
 
-    def calc_bumpiness(self, area: np.ndarray) -> float:
-        # 1. Sanitiza: qualquer valor > 0 vira 1 (evita problemas com valores incorretos)
-        area = np.where(area > 0, 1, 0)
 
-        # 2. Calcula altura de cada coluna
-        heights = [area.shape[0] - np.argmax(col[::-1]) if np.any(col) else 0
-                for col in area.T]
 
-        # 3. Diferença de altura entre colunas vizinhas
-        diffs = np.abs(np.diff(heights))
+    def get_column_heights(self, area: np.ndarray) -> list[int]:
+        """
+        Retorna a altura de cada coluna do tabuleiro.
+        A altura é calculada da primeira célula de cima (linha 0) até a primeira
+        ocorrência de um número diferente de 1. Se todos forem 1, altura será 0.
+        """
+        rows, cols = area.shape
+        heights = []
 
-        # 4. Penaliza apenas onde há diferença (bumpiness real)
-        return np.count_nonzero(diffs)
+        for col_index in range(cols):
+            col = area[:, col_index]
+            height = 0
+            for r in range(rows):  # de cima (0) para baixo (17)
+                if col[r] == 1:
+                    height = rows - r
+                    break
+            else:
+                # Todos os valores são 1 na coluna
+                height = 0
+            heights.append(height)
 
+        return heights
+
+
+    def calc_bumpiness(self,area:np.ndarray)->int:
+        """Calcula a bumpiness como a soma das diferenças absolutas de altura entre colunas adjacentes."""
+        cols = area.shape[1]
+
+        heights = self.get_column_heights(area = area)
+
+        bumpiness = 0
+        for i in range(cols - 1):
+            bumpiness += abs(heights[i] - heights[i+1])
+
+        return bumpiness
 
     def count_holes(self,area: np.ndarray) -> int:
         holes = 0
@@ -442,7 +402,7 @@ class TetrisEnv(gym.Env):
             new_bumpiness = self.calc_bumpiness(area = new_fixed_gamearea)
 
             delta_bumpiness = new_bumpiness - old_bumpiness 
-            bumpiness_penalty = -delta_bumpiness 
+            bumpiness_penalty = -delta_bumpiness
 
         else:
             bumpiness_penalty = 0
@@ -512,21 +472,19 @@ class TetrisEnv(gym.Env):
 
         return score_reward
     
-    def calc_reward(self, piece_in_play: bool):
+    def calc_reward(self):
 
         # Atualiza a área de jogo
-        if piece_in_play:
-            
-            height_penalty = self.calc_height_penalty()
-            hole_penalty = self.calc_hole_penalty()
-            bumpiness_pentalty = self.calc_bumpiness_penalty()
-            penalty = hole_penalty + height_penalty + bumpiness_pentalty
-        else:
-            penalty = 0
-            hole_penalty=0
-            height_penalty=0
-            bumpiness_pentalty = 0
-               
+        
+        ## Penalidades
+        height_penalty = self.calc_height_penalty()
+        hole_penalty = self.calc_hole_penalty()
+        bumpiness_pentalty = self.calc_bumpiness_penalty()
+        penalty = hole_penalty + height_penalty + bumpiness_pentalty
+
+        
+
+        ## Rewards
         score_reward = self.calc_score_reward()
         safe_reward = self.calc_lower_pieces_reward()/max(np.abs(hole_penalty),1)
 
@@ -547,7 +505,8 @@ class TetrisEnv(gym.Env):
 
         total_reward = total_reward
 
-        reward_dict = {"hole_penalty":hole_penalty,
+        reward_dict = {
+                        "hole_penalty":hole_penalty,
                        "height_penalty":height_penalty,
                        "bumpiness_penalty":bumpiness_pentalty,
                        "clean_line_progress_reward":clean_line_progress_reward,

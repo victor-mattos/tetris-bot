@@ -18,13 +18,13 @@ done = False
 step_count = 0
 
 
-env = TetrisEnv(window_type="SDL2", memory_size=25)
+env = TetrisEnv(window_type="SDL2", memory_size=50)
 print("\n[INFO] Reiniciando ambiente...")
 obs, _ = env.reset()
 
 # Carrega o modelo treinado
 # model = PPO.load("ppo_tetris")
-model = DQN.load("dqn_tetris_v4")
+model = DQN.load("dqn_tetris_v5")
 reward_sum = 0
 aux_list = []
 
@@ -47,11 +47,8 @@ while not done:
     # Small delay to make the game visible
     time.sleep(0.1)
     step_count += 1
-
 print("\n[FIM] Episódio finalizado.")
 
-done = False
-step_count = 0
 
 df = pd.DataFrame(env.applied_rewards)
 df['total'] = df.sum(axis = 1)
