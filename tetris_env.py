@@ -114,7 +114,84 @@ class TetrisEnv(gym.Env):
         # Verifica simplesmente se existe pelo menos um valor não-zero na sub-área
         return np.any(spawn_center != 0)
 
+    def get_all_rotations(self,piece:np.ndarray)->list[np.ndarray]:
+        """
+        Gera todas as rotações válidas de uma peça 4x4.
+        Remove rotações duplicadas (ex: quadrado).
+        """
+        rotations = []
+        seen = set()
+        
+        for k in range(4):
+            rotated = np.rot90(piece, -k)
+            # Remove linhas e colunas vazias
+            rows = np.any(rotated, axis=1)
+            cols = np.any(rotated, axis=0)
+            trimmed = rotated[np.ix_(rows, cols)]
+
+            key = trimmed.tobytes()
+            if key not in seen:
+                rotations.append(trimmed)
+                seen.add(key)
+
+        return rotations
     
+    def render_piece_on_board(self, piece_dict):
+        """
+        Aplica uma peça rotacionada no tabuleiro e retorna a matriz resultante.
+        Útil para debug.
+        """
+        # fixed_area = self.get_fixed_gamearea() 
+        fixed_area = self.get_fixed_gamearea().astype(np.int32).copy()
+        rotation = piece_dict["rotation"].astype(np.int32)
+        # rotation = piece_dict["rotation"]
+        row = piece_dict["row"]
+        col = piece_dict["col"]
+
+        p_height, p_width = rotation.shape
+
+        # Cria uma cópia do tabuleiro resultante com a peça aplicada
+        board_with_piece = fixed_area.copy()
+        board_with_piece[row:row+p_height, col:col+p_width] += rotation
+
+        # Opcional: garantir que os valores fiquem em [0,1] (caso sobreposição acidental ocorra)
+        board_with_piece = np.clip(board_with_piece, 0, 1)
+
+        return board_with_piece
+
+    def get_all_pieces_positions(self):
+        ENTRY_SPACE_START_I = 0
+        ENTRY_SPACE_END_I = 4
+        ENTRY_SPACE_START_J = 3
+        ENTRY_SPACE_END_J = 7
+
+
+        current_area = self.get_current_gamearea() 
+        board_height, board_width = current_area.shape
+
+        piece_shape = current_area[ENTRY_SPACE_START_I:ENTRY_SPACE_END_I, ENTRY_SPACE_START_J:ENTRY_SPACE_END_J]
+
+        piece_rotations = self.get_all_rotations(piece = piece_shape)
+        possible_positions = []
+
+        for rotation in piece_rotations:
+            p_height, p_width = rotation.shape
+            for col in range(board_width - p_width + 1):  # evita sair pela direita
+                for row in range(board_height - p_height + 1):  # testa queda
+                    area_section = current_area[row:row+p_height, col:col+p_width]
+                    if np.any((area_section + rotation) > 1):  # colisão
+                        break  # peça não pode descer mais
+                final_row = row - 1  # última linha válida
+                if final_row >= 0:
+                    possible_positions.append({
+                        "rotation": rotation,
+                        "row": final_row,
+                        "col": col
+                    })
+
+        return possible_positions
+
+
     def step(self, action):
 
         # Atualiza observação
@@ -164,7 +241,7 @@ class TetrisEnv(gym.Env):
         area = self.game_wrapper.game_area()
         tiles = np.array(area)
         obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
-        
+
         self.update_current_gamearea()
         self.update_current_fixed_gamearea()
         done = self.game_wrapper.game_over()
