@@ -8,7 +8,7 @@ import numpy as np
 from gymnasium.spaces import Discrete, Box
 from pyboy import PyBoy, WindowEvent
 from collections import deque
-
+from stable_baselines3 import PPO,DQN
 
 from settings import ROM_PATH
 from typing import Optional
@@ -109,7 +109,7 @@ class TetrisEnv(gym.Env):
     def analize_piece_in_play(self) -> bool:
         """Simplificada: Retorna True se houver QUALQUER bloco na área de spawn."""
         ENTRY_SPACE_START_I = 0
-        ENTRY_SPACE_END_I = 2
+        ENTRY_SPACE_END_I = 3
         ENTRY_SPACE_START_J = 4
         ENTRY_SPACE_END_J = 7
 
@@ -197,13 +197,13 @@ class TetrisEnv(gym.Env):
 
 
     def hard_drop_piece(self):
-        self.move_piece_down(n_clicks=4)
+        self.move_piece_down(n_clicks=6)
         piece_in_play = self.analize_piece_in_play()
         done = self.game_wrapper.game_over()
         
         while piece_in_play==False and done == False:
             done = self.game_wrapper.game_over()
-            self.move_piece_down(n_clicks=1)          
+            self.move_piece_down(n_clicks=2)          
             piece_in_play = self.analize_piece_in_play()
 
 
@@ -317,6 +317,9 @@ class TetrisEnv(gym.Env):
     def step(self, action):
         '''
             self = TetrisEnv(window_type="SDL2", memory_size=50)
+            obs, _ = self.reset()
+            model = DQN.load("dqn_tetris_v8")
+            action, _ = model.predict(obs, deterministic=True)
         '''
 
         
