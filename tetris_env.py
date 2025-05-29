@@ -47,6 +47,11 @@ class TetrisEnv(gym.Env):
         self.piece_visible = False
         self.applied_rewards = []
 
+        from settings import PIECES_SHAPES 
+
+        self.std_pieces_shapes = PIECES_SHAPES
+
+
     ###################################################################################
     ###################################################################################
 
@@ -114,6 +119,94 @@ class TetrisEnv(gym.Env):
         # Verifica simplesmente se existe pelo menos um valor não-zero na sub-área
         return np.any(spawn_center != 0)
 
+    def rotate_piece_to_target_position(self,num_rotations:int):
+        # Gira a peça
+        for _ in range(num_rotations):
+            self.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+            self.pyboy.tick()
+
+    def move_piece_to_target_column(self, target_col:int):
+        ENTRY_SPACE_START_J = 3
+        
+        piece_shape = self.get_new_piece_shape()
+        # Verifica se cada coluna tem pelo menos um '1'
+        cols_occupied = np.any(piece_shape, axis=0)
+        # Indexa a primeira coluna ocupada
+        current_col = np.argmax(cols_occupied) + ENTRY_SPACE_START_J
+
+        delta = target_col - current_col
+        key = WindowEvent.PRESS_ARROW_RIGHT if delta > 0 else WindowEvent.PRESS_ARROW_LEFT
+
+        for _ in range(abs(delta)):
+            self.pyboy.send_input(key)
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT if delta > 0 else WindowEvent.RELEASE_ARROW_LEFT)
+            self.pyboy.tick()
+
+
+    ###################################################################################
+    ###################################################################################
+
+    def crop_piece(self,piece:np.ndarray)->np.ndarray:
+        """Remove linhas e colunas que são todas zeros."""
+        # Detect rows and columns that have any 1
+        rows = np.any(piece, axis=1)
+        cols = np.any(piece, axis=0)
+        # Slice array to non-zero rows/cols
+        cropped = piece[np.ix_(rows, cols)]
+        return cropped
+
+
+    ###################################################################################
+    ###################################################################################
+
+
+    def place_piece_in_standard_position(self):
+
+        piece_shape = self.get_new_piece_shape()
+        piece_shape = self.crop_piece(piece = piece_shape)
+
+        done = self.game_wrapper.game_over()
+        match_position = False
+        
+        while not match_position and not done:
+            done = self.game_wrapper.game_over()
+
+            for name, shape in self.std_pieces_shapes.items():
+
+                if np.array_equal(piece_shape, shape):
+                    
+                    match_position = True
+            
+            if match_position == False:
+                self.rotate_piece_to_target_position(num_rotations=1)
+                piece_shape = self.get_new_piece_shape()
+                piece_shape = self.crop_piece(piece = piece_shape)
+
+
+
+
+    def move_piece_down(self,n_clicks:int=4):
+        for _ in range(n_clicks):
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
+            self.pyboy.tick()
+            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
+
+
+    def hard_drop_piece(self):
+        self.move_piece_down(n_clicks=4)
+        piece_in_play = self.analize_piece_in_play()
+        done = self.game_wrapper.game_over()
+        
+        while piece_in_play==False and done == False:
+            done = self.game_wrapper.game_over()
+            self.move_piece_down(n_clicks=1)          
+            piece_in_play = self.analize_piece_in_play()
+
+
     def get_all_rotations(self,piece:np.ndarray)->list[np.ndarray]:
         """
         Gera todas as rotações válidas de uma peça 4x4.
@@ -136,6 +229,26 @@ class TetrisEnv(gym.Env):
 
         return rotations
     
+    def identify_piece(self, new_piece: np.ndarray) -> tuple:
+        """
+        """
+        for name, standard_shape in self.std_pieces_shapes.items():
+            standard_rotations = self.get_all_rotations(standard_shape)
+
+            for k in range(4):
+                rotated = np.rot90(new_piece, -k)
+                rows = np.any(rotated, axis=1)
+                cols = np.any(rotated, axis=0)
+                trimmed = rotated[np.ix_(rows, cols)]
+
+                # Comparar com a forma padrão pura
+                standard_trimmed = standard_rotations[0]  # Padrão sem rotação
+                if trimmed.shape == standard_trimmed.shape and np.array_equal(trimmed, standard_trimmed):
+                    return name, k  # Peça e número de rotações necessárias
+        return None, None
+
+    
+
     def render_piece_on_board(self, piece_dict):
         """
         Aplica uma peça rotacionada no tabuleiro e retorna a matriz resultante.
@@ -159,7 +272,7 @@ class TetrisEnv(gym.Env):
 
         return board_with_piece
 
-    def get_all_pieces_positions(self):
+    def get_new_piece_shape(self):
         ENTRY_SPACE_START_I = 0
         ENTRY_SPACE_END_I = 4
         ENTRY_SPACE_START_J = 3
@@ -171,8 +284,17 @@ class TetrisEnv(gym.Env):
 
         piece_shape = current_area[ENTRY_SPACE_START_I:ENTRY_SPACE_END_I, ENTRY_SPACE_START_J:ENTRY_SPACE_END_J]
 
+        return piece_shape
+
+
+    def get_all_pieces_positions(self):
+        piece_shape = self.get_new_piece_shape()
         piece_rotations = self.get_all_rotations(piece = piece_shape)
         possible_positions = []
+
+
+        current_area = self.get_current_gamearea() 
+        board_height, board_width = current_area.shape
 
         for rotation in piece_rotations:
             p_height, p_width = rotation.shape
@@ -193,62 +315,43 @@ class TetrisEnv(gym.Env):
 
 
     def step(self, action):
+        '''
+            self = TetrisEnv(window_type="SDL2", memory_size=50)
+        '''
 
-        # Atualiza observação
-        # area = self.game_wrapper.game_area()
-        # tiles = np.array(area)
         
         done = self.game_wrapper.game_over()
         # Define ações compostas: mover até a coluna X com rotação Y
         target_col = action // 4
         num_rotations = action % 4
 
-        # Gira a peça
-        for _ in range(num_rotations):
-            self.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
-            self.pyboy.tick()
-            self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
-            self.pyboy.tick()
+        self.move_piece_to_target_column(target_col= target_col)
+        self.rotate_piece_to_target_position(num_rotations= num_rotations)
+        self.hard_drop_piece()      
 
-        # Obtem posição atual da peça (assuma central, ou pode tentar detectar)
-        # Por simplicidade, vamos assumir que ela começa no centro (coluna 4)
-        current_col = 4
-        delta = target_col - current_col
-        key = WindowEvent.PRESS_ARROW_RIGHT if delta > 0 else WindowEvent.PRESS_ARROW_LEFT
-
-        for _ in range(abs(delta)):
-            self.pyboy.send_input(key)
-            self.pyboy.tick()
-            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT if delta > 0 else WindowEvent.RELEASE_ARROW_LEFT)
-            self.pyboy.tick()
-
-        for _ in range(4):
-            self.pyboy.tick()
-            self.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
-            self.pyboy.tick()
-            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
-            
-        piece_in_play = self.analize_piece_in_play()       
-        while piece_in_play==False and done==False:
-            self.pyboy.tick()
-            self.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
-            self.pyboy.tick()
-            self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
-                
-            piece_in_play = self.analize_piece_in_play()
-            done = self.game_wrapper.game_over()
-
-        area = self.game_wrapper.game_area()
-        tiles = np.array(area)
-        obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
-
-        self.update_current_gamearea()
-        self.update_current_fixed_gamearea()
         done = self.game_wrapper.game_over()
 
-        reward = -100.0 if done else self.calc_reward()
-        
-        self.step_count += 1
+
+        if not done:
+
+            self.place_piece_in_standard_position()
+            self.update_current_gamearea()
+            self.update_current_fixed_gamearea()
+            
+            area = self.game_wrapper.game_area()
+            
+            tiles = np.array(area)
+            obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
+            reward = self.calc_reward()
+            
+            self.step_count += 1
+
+        else: 
+
+            area = self.game_wrapper.game_area()
+            tiles = np.array(area)
+            obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
+            reward = -100
 
         if self.step_count > 1000:
             done = True
@@ -556,24 +659,24 @@ class TetrisEnv(gym.Env):
         ## Penalidades
         height_penalty = self.calc_height_penalty()
         hole_penalty = self.calc_hole_penalty()
-        bumpiness_pentalty = self.calc_bumpiness_penalty()
+        bumpiness_pentalty = min(self.calc_bumpiness_penalty(),1)
         penalty = hole_penalty + height_penalty + bumpiness_pentalty
 
         
 
         ## Rewards
         score_reward = self.calc_score_reward()
-        safe_reward = self.calc_lower_pieces_reward()/max(np.abs(hole_penalty),1)
+        safe_reward = self.calc_lower_pieces_reward()*0.75/max(np.abs(hole_penalty),1)
 
 
         if score_reward == 0:
-            clean_line_progress_reward = self.calc_cleaning_line_progress_reward()/max(np.abs(hole_penalty),1)
+            clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward()/max(np.abs(hole_penalty),1),5)
 
         else:
             clean_line_progress_reward = 0
 
         # Sobreviver
-        survival_reward = self.step_count/10
+        survival_reward = 1
    
         # Penalidades
         reward = score_reward + survival_reward + safe_reward + clean_line_progress_reward  

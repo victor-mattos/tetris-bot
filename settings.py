@@ -1,5 +1,7 @@
 import os
 from pyboy import WindowEvent
+import numpy as np 
+
 
 ROOT = os.getcwd()
 ROM_NAME = 'tetris.gb'
@@ -31,3 +33,46 @@ piece_map = {'133':"T",
              "130":"H",
              "132":"L",
              "139":"I"}
+
+PIECES_SHAPES = {
+    # Peça I (linha)
+    "I": np.array([
+        [1, 1, 1, 1]
+    ], dtype=np.uint8),
+
+    # Peça O (quadrado)
+    "O": np.array([
+        [1, 1],
+        [1, 1]
+    ], dtype=np.uint8),
+
+    # Peça T
+    "T": np.array([
+        [0, 1, 0],
+        [1, 1, 1]
+    ], dtype=np.uint8),
+
+    # Peça S
+    "S": np.array([
+        [0, 1, 1],
+        [1, 1, 0]
+    ], dtype=np.uint8),
+
+    # Peça Z
+    "Z": np.array([
+        [1, 1, 0],
+        [0, 1, 1]
+    ], dtype=np.uint8),
+
+    # Peça J
+    "J": np.array([
+        [1, 0, 0],
+        [1, 1, 1]
+    ], dtype=np.uint8),
+
+    # Peça L
+    "L": np.array([
+        [0, 0, 1],
+        [1, 1, 1]
+    ], dtype=np.uint8)
+}
