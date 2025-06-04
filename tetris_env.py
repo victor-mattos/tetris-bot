@@ -663,17 +663,17 @@ class TetrisEnv(gym.Env):
         height_penalty = self.calc_height_penalty()
         hole_penalty = self.calc_hole_penalty()
         bumpiness_pentalty = min(self.calc_bumpiness_penalty(),1)
-        penalty = hole_penalty + height_penalty + bumpiness_pentalty
+        penalty = (hole_penalty + height_penalty + bumpiness_pentalty)*0.5
 
         
 
         ## Rewards
         score_reward = self.calc_score_reward()
-        safe_reward = self.calc_lower_pieces_reward()*0.75/max(np.abs(hole_penalty),1)
+        safe_reward = self.calc_lower_pieces_reward()*0.5
 
 
         if score_reward == 0:
-            clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward()/max(np.abs(hole_penalty),1),5)
+            clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward(),3)
 
         else:
             clean_line_progress_reward = 0
