@@ -318,7 +318,7 @@ class TetrisEnv(gym.Env):
         '''
             self = TetrisEnv(window_type="SDL2", memory_size=50)
             obs, _ = self.reset()
-            model = DQN.load("dqn_tetris_v8")
+            model = DQN.load("dqn_tetris_v14")
             action, _ = model.predict(obs, deterministic=True)
         '''
 

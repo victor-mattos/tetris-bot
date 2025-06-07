@@ -24,7 +24,7 @@ obs, _ = env.reset()
 
 # Carrega o modelo treinado
 # model = PPO.load("ppo_tetris")
-model = DQN.load("dqn_tetris_v13")
+model = DQN.load("dqn_tetris_v14")
 reward_sum = 0
 aux_list = []
 
@@ -49,7 +49,7 @@ while not done:
     step_count += 1
 print("\n[FIM] Episódio finalizado.")
 
-
+done = False
 df = pd.DataFrame(env.applied_rewards)
 df['total'] = df.sum(axis = 1)
 print(df)
