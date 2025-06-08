@@ -119,6 +119,10 @@ class TetrisEnv(gym.Env):
         # Verifica simplesmente se existe pelo menos um valor não-zero na sub-área
         return np.any(spawn_center != 0)
 
+    ###################################################################################
+    ###################################################################################
+
+
     def rotate_piece_to_target_position(self,num_rotations:int):
         # Gira a peça
         for _ in range(num_rotations):
@@ -126,6 +130,9 @@ class TetrisEnv(gym.Env):
             self.pyboy.tick()
             self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
             self.pyboy.tick()
+
+    ###################################################################################
+    ###################################################################################
 
     def move_piece_to_target_column(self, target_col:int):
         ENTRY_SPACE_START_J = 3
@@ -145,7 +152,6 @@ class TetrisEnv(gym.Env):
             self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT if delta > 0 else WindowEvent.RELEASE_ARROW_LEFT)
             self.pyboy.tick()
 
-
     ###################################################################################
     ###################################################################################
 
@@ -158,10 +164,8 @@ class TetrisEnv(gym.Env):
         cropped = piece[np.ix_(rows, cols)]
         return cropped
 
-
     ###################################################################################
     ###################################################################################
-
 
     def place_piece_in_standard_position(self):
 
@@ -185,8 +189,8 @@ class TetrisEnv(gym.Env):
                 piece_shape = self.get_new_piece_shape()
                 piece_shape = self.crop_piece(piece = piece_shape)
 
-
-
+    ###################################################################################
+    ###################################################################################
 
     def move_piece_down(self,n_clicks:int=4):
         for _ in range(n_clicks):
@@ -195,6 +199,8 @@ class TetrisEnv(gym.Env):
             self.pyboy.tick()
             self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
 
+    ###################################################################################
+    ###################################################################################
 
     def hard_drop_piece(self):
         self.move_piece_down(n_clicks=6)
@@ -206,6 +212,8 @@ class TetrisEnv(gym.Env):
             self.move_piece_down(n_clicks=2)          
             piece_in_play = self.analize_piece_in_play()
 
+    ###################################################################################
+    ###################################################################################
 
     def get_all_rotations(self,piece:np.ndarray)->list[np.ndarray]:
         """
@@ -228,7 +236,10 @@ class TetrisEnv(gym.Env):
                 seen.add(key)
 
         return rotations
-    
+
+    ###################################################################################
+    ###################################################################################
+
     def identify_piece(self, new_piece: np.ndarray) -> tuple:
         """
         """
@@ -246,8 +257,9 @@ class TetrisEnv(gym.Env):
                 if trimmed.shape == standard_trimmed.shape and np.array_equal(trimmed, standard_trimmed):
                     return name, k  # Peça e número de rotações necessárias
         return None, None
-
     
+    ###################################################################################
+    ###################################################################################
 
     def render_piece_on_board(self, piece_dict):
         """
@@ -272,6 +284,9 @@ class TetrisEnv(gym.Env):
 
         return board_with_piece
 
+    ###################################################################################
+    ###################################################################################
+
     def get_new_piece_shape(self):
         ENTRY_SPACE_START_I = 0
         ENTRY_SPACE_END_I = 4
@@ -286,6 +301,8 @@ class TetrisEnv(gym.Env):
 
         return piece_shape
 
+    ###################################################################################
+    ###################################################################################
 
     def get_all_pieces_positions(self):
         piece_shape = self.get_new_piece_shape()
@@ -313,12 +330,14 @@ class TetrisEnv(gym.Env):
 
         return possible_positions
 
+    ###################################################################################
+    ###################################################################################
 
     def step(self, action):
         '''
             self = TetrisEnv(window_type="SDL2", memory_size=50)
             obs, _ = self.reset()
-            model = DQN.load("dqn_tetris_v14")
+            model = DQN.load("dqn_tetris_v15")
             action, _ = model.predict(obs, deterministic=True)
         '''
 
@@ -328,8 +347,12 @@ class TetrisEnv(gym.Env):
         target_col = action // 4
         num_rotations = action % 4
 
+        print(f"Target column: {target_col}")
+        print(f"Num of Rotations: {num_rotations}")
+
+
+        self.rotate_piece_to_target_position(num_rotations = num_rotations)
         self.move_piece_to_target_column(target_col= target_col)
-        self.rotate_piece_to_target_position(num_rotations= num_rotations)
         self.hard_drop_piece()      
 
         done = self.game_wrapper.game_over()
@@ -380,11 +403,9 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-
     def update_current_score(self):
         self.score = self.game_wrapper.score 
 
-    
     ###################################################################################
     ###################################################################################
 
@@ -395,6 +416,9 @@ class TetrisEnv(gym.Env):
         game_area = np.where(tiles == 47, 0, 1)
 
         return game_area
+
+    ###################################################################################
+    ###################################################################################
 
     def update_current_gamearea(self):
         gamearea = self.get_current_gamearea()
@@ -433,10 +457,6 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-
-
-
-
     def get_column_heights(self, area: np.ndarray) -> list[int]:
         """
         Retorna a altura de cada coluna do tabuleiro.
@@ -460,6 +480,8 @@ class TetrisEnv(gym.Env):
 
         return heights
 
+    ###################################################################################
+    ###################################################################################
 
     def calc_bumpiness(self,area:np.ndarray)->int:
         """Calcula a bumpiness como a soma das diferenças absolutas de altura entre colunas adjacentes."""
@@ -472,6 +494,9 @@ class TetrisEnv(gym.Env):
             bumpiness += abs(heights[i] - heights[i+1])
 
         return bumpiness
+
+    ###################################################################################
+    ###################################################################################
 
     def count_holes(self,area: np.ndarray) -> int:
         holes = 0
@@ -539,7 +564,10 @@ class TetrisEnv(gym.Env):
 
         reward = min(reward,6)
         return reward
-    
+
+    ###################################################################################
+    ###################################################################################
+
     def calc_cleaning_line_progress_reward(self):
         # Verifica se tem histórico suficiente
         if len(self.fixed_gamearea_history) >= 2:
@@ -573,6 +601,8 @@ class TetrisEnv(gym.Env):
         else:
             return 0.0
 
+    ###################################################################################
+    ###################################################################################
 
     def calc_bumpiness_penalty(self):
          # Verifica se tem mais de uma peça em jogo
@@ -592,6 +622,8 @@ class TetrisEnv(gym.Env):
 
         return bumpiness_penalty 
 
+    ###################################################################################
+    ###################################################################################
 
     def calc_height_penalty(self):
         
@@ -617,6 +649,9 @@ class TetrisEnv(gym.Env):
         
         return height_penalty
 
+    ###################################################################################
+    ###################################################################################
+
     def calc_hole_penalty(self):
 
         # Verifica se tem mais de uma peça em jogo
@@ -640,6 +675,8 @@ class TetrisEnv(gym.Env):
         
         return hole_penalty 
             
+    ###################################################################################
+    ###################################################################################
             
     def calc_score_reward(self):
         # Score
@@ -654,26 +691,33 @@ class TetrisEnv(gym.Env):
             score_reward = score_diff*10
 
         return score_reward
-    
+
+    ###################################################################################
+    ###################################################################################
+
     def calc_reward(self):
 
         # Atualiza a área de jogo
-        
+        PENALTY_MULT = 0.7
         ## Penalidades
         height_penalty = self.calc_height_penalty()
-        hole_penalty = self.calc_hole_penalty()
-        bumpiness_pentalty = min(self.calc_bumpiness_penalty(),1)
-        penalty = (hole_penalty + height_penalty + bumpiness_pentalty)*0.5
+        hole_penalty = self.calc_hole_penalty()*PENALTY_MULT
+        bumpiness_pentalty = min(self.calc_bumpiness_penalty(),1)*PENALTY_MULT
+        penalty = hole_penalty + height_penalty + bumpiness_pentalty
 
         
 
         ## Rewards
         score_reward = self.calc_score_reward()
-        safe_reward = self.calc_lower_pieces_reward()*0.5
+        safe_reward = self.calc_lower_pieces_reward()*0.7
+
 
 
         if score_reward == 0:
-            clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward(),3)
+            if hole_penalty == 0:
+                clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward(),1.5)
+            else:
+                clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward(),1.5)*0.5
 
         else:
             clean_line_progress_reward = 0
@@ -701,6 +745,9 @@ class TetrisEnv(gym.Env):
         self.applied_rewards.append(reward_dict)
         # print(f"Score Reward: {total_reward}")
         return total_reward
-        
+
+    ###################################################################################
+    ###################################################################################
+
 
     
