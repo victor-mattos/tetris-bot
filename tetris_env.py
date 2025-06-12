@@ -19,9 +19,11 @@ class TetrisEnv(gym.Env):
     def __init__(self, window_type: str = "headless", memory_size: int = 3):
         super().__init__()
 
-        self.action_space = Discrete(6)  # 6 ações possíveis
+        # self.action_space = Discrete(6)  # 6 ações possíveis
         self.observation_space = Box(low=0.0, high=1.0, shape=(180,), dtype=np.float32)
 
+        self.action_space = Discrete(10 * 4)  # 10 posições finais × 4 rotações
+        
         self.window_type = window_type
         self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
         self.game_wrapper = self.pyboy.game_wrapper()
@@ -31,7 +33,6 @@ class TetrisEnv(gym.Env):
         for _ in range(5):
             self.pyboy.tick()
 
-        self.action_space = Discrete(10 * 4)  # 10 posições finais × 4 rotações
 
 
         self.score = 0
@@ -347,8 +348,8 @@ class TetrisEnv(gym.Env):
         target_col = action // 4
         num_rotations = action % 4
 
-        print(f"Target column: {target_col}")
-        print(f"Num of Rotations: {num_rotations}")
+        # print(f"Target column: {target_col}")
+        # print(f"Num of Rotations: {num_rotations}")
 
 
         self.rotate_piece_to_target_position(num_rotations = num_rotations)
@@ -381,6 +382,13 @@ class TetrisEnv(gym.Env):
 
         if self.step_count > 1000:
             done = True
+        
+        # print("Reward Applied:")
+        # for key, value in self.applied_rewards[-1].items():
+        #     print(f"  {key}: {value}")
+
+        # print(f"Total: {reward}")
+
         return obs, reward, done, False, {}
 
 
@@ -698,10 +706,10 @@ class TetrisEnv(gym.Env):
     def calc_reward(self):
 
         # Atualiza a área de jogo
-        PENALTY_MULT = 0.7
+        PENALTY_MULT = 0.6
         ## Penalidades
-        height_penalty = self.calc_height_penalty()
-        hole_penalty = self.calc_hole_penalty()*PENALTY_MULT
+        height_penalty = self.calc_height_penalty()*PENALTY_MULT
+        hole_penalty = self.calc_hole_penalty()
         bumpiness_pentalty = min(self.calc_bumpiness_penalty(),1)*PENALTY_MULT
         penalty = hole_penalty + height_penalty + bumpiness_pentalty
 
@@ -714,10 +722,8 @@ class TetrisEnv(gym.Env):
 
 
         if score_reward == 0:
-            if hole_penalty == 0:
-                clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward(),1.5)
-            else:
-                clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward(),1.5)*0.5
+            # if hole_penalty == 0:
+            clean_line_progress_reward = min(self.calc_cleaning_line_progress_reward()*0.6,3)
 
         else:
             clean_line_progress_reward = 0
