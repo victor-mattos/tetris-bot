@@ -19,11 +19,11 @@ class TetrisEnv(gym.Env):
     def __init__(self, window_type: str = "headless", memory_size: int = 3):
         super().__init__()
 
-        # self.action_space = Discrete(6)  # 6 ações possíveis
-        self.observation_space = Box(low=0.0, high=1.0, shape=(180,), dtype=np.float32)
+        # self.observation_space = Box(low=0.0, high=1.0, shape=(180,), dtype=np.float32)
 
         self.action_space = Discrete(10 * 4)  # 10 posições finais × 4 rotações
-        
+        self.observation_space = Box(low=0.0, high=1.0, shape=(18, 10), dtype=np.float32)
+
         self.window_type = window_type
         self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
         self.game_wrapper = self.pyboy.game_wrapper()
@@ -100,8 +100,8 @@ class TetrisEnv(gym.Env):
         processed = np.where(area == 47, 0, 1)  # 47 = vazio, qualquer outra coisa vira 1
 
         # Flatten e normaliza como float32
-        processed = processed.flatten().astype(np.float32)
-        
+        # processed = processed.flatten().astype(np.float32)
+
         return processed
     
     ###################################################################################
@@ -368,7 +368,7 @@ class TetrisEnv(gym.Env):
             area = self.game_wrapper.game_area()
             
             tiles = np.array(area)
-            obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
+            obs = self.preprocess_game_area(tiles)
             reward = self.calc_reward()
             
             self.step_count += 1
@@ -377,7 +377,7 @@ class TetrisEnv(gym.Env):
 
             area = self.game_wrapper.game_area()
             tiles = np.array(area)
-            obs = self.preprocess_game_area(tiles).flatten().astype(np.float32)
+            obs = self.preprocess_game_area(tiles)
             reward = -100
 
         if self.step_count > 1000:
