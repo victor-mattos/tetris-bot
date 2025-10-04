@@ -6,12 +6,13 @@ import math
 import numpy as np
 
 from gymnasium.spaces import Discrete, Box
-from pyboy import PyBoy, WindowEvent
+from pyboy import PyBoy,WindowEvent
+# from pyboy.utils import WindowEvent
 from collections import deque
 from stable_baselines3 import PPO,DQN
 
 from settings import ROM_PATH
-from typing import Optional
+from typing import Optional, Tuple,List
 
 
 class TetrisEnv(gym.Env):
@@ -22,7 +23,15 @@ class TetrisEnv(gym.Env):
         # self.observation_space = Box(low=0.0, high=1.0, shape=(180,), dtype=np.float32)
 
         self.action_space = Discrete(10 * 4)  # 10 posições finais × 4 rotações
-        self.observation_space = Box(low=0.0, high=1.0, shape=(18, 10), dtype=np.float32)
+        # self.observation_space = Box(low=0.0, high=1.0, shape=(40,18, 10), dtype=np.float32)
+
+        self.observation_space = Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(40, 13),
+            dtype=np.float32
+        )
+
 
         self.window_type = window_type
         self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
@@ -42,15 +51,18 @@ class TetrisEnv(gym.Env):
         self.memory_size = memory_size
         self.area_history = deque(maxlen=self.memory_size)
         self.fixed_gamearea_history = deque(maxlen=self.memory_size)
+        self.possible_plays = deque(maxlen=self.memory_size)
 
         self.last_piece_id = None
         self.current_piece_id = None
         self.piece_visible = False
         self.applied_rewards = []
 
-        from settings import PIECES_SHAPES 
+        from settings import PIECES_SHAPES, MEMORY_PIECE_MAP, PIECE_ORDER
 
         self.std_pieces_shapes = PIECES_SHAPES
+        self.memory_piece_map = MEMORY_PIECE_MAP
+        self.piece_order = PIECE_ORDER
 
 
     ###################################################################################
@@ -66,28 +78,22 @@ class TetrisEnv(gym.Env):
         self.score = 0
         self.area_history.clear()
         self.fixed_gamearea_history.clear()
+        self.possible_plays.clear()
         self.last_piece_id = None
         self.current_piece_id = None
         self.piece_visible = False
         self.applied_rewards = []
 
-        # if hasattr(self, "pyboy") and self.pyboy:
-        #     self.pyboy.stop()
-        #     del self.pyboy
             
         self.game_wrapper.reset_game()
-        # self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
-        # self.game_wrapper = self.pyboy.game_wrapper()
-        # self.game_wrapper.start_game()
 
         for _ in range(5):
             self.pyboy.tick()
 
-        area = self.game_wrapper.game_area()
-        tiles = np.array(area)
-        obs = self.preprocess_game_area(tiles)
+        obs_feature = self.get_all_obs_features()
         gc.collect()
-        return obs, {}
+
+        return obs_feature, {}
 
     
     ###################################################################################
@@ -218,73 +224,33 @@ class TetrisEnv(gym.Env):
 
     def get_all_rotations(self,piece:np.ndarray)->list[np.ndarray]:
         """
-        Gera todas as rotações válidas de uma peça 4x4.
-        Remove rotações duplicadas (ex: quadrado).
+        Gera todas as rotações válidas da peça (até 4),
+        aparando linhas/colunas vazias e removendo duplicatas.
+        Considera shape para diferenciar 1x4 de 4x1.
         """
         rotations = []
         seen = set()
-        
+
         for k in range(4):
             rotated = np.rot90(piece, -k)
-            # Remove linhas e colunas vazias
+
+            # Remove linhas/colunas vazias
             rows = np.any(rotated, axis=1)
             cols = np.any(rotated, axis=0)
-            trimmed = rotated[np.ix_(rows, cols)]
+            if not rows.any() or not cols.any():
+                continue
 
-            key = trimmed.tobytes()
+            trimmed = rotated[np.ix_(rows, cols)].astype(np.uint8, copy=False)
+            # Inclui o shape na chave para diferenciar 1x4 de 4x1
+            key = (trimmed.shape, trimmed.tobytes(order="C"))
+
             if key not in seen:
                 rotations.append(trimmed)
                 seen.add(key)
 
-        return rotations
+        return rotations 
 
-    ###################################################################################
-    ###################################################################################
-
-    def identify_piece(self, new_piece: np.ndarray) -> tuple:
-        """
-        """
-        for name, standard_shape in self.std_pieces_shapes.items():
-            standard_rotations = self.get_all_rotations(standard_shape)
-
-            for k in range(4):
-                rotated = np.rot90(new_piece, -k)
-                rows = np.any(rotated, axis=1)
-                cols = np.any(rotated, axis=0)
-                trimmed = rotated[np.ix_(rows, cols)]
-
-                # Comparar com a forma padrão pura
-                standard_trimmed = standard_rotations[0]  # Padrão sem rotação
-                if trimmed.shape == standard_trimmed.shape and np.array_equal(trimmed, standard_trimmed):
-                    return name, k  # Peça e número de rotações necessárias
-        return None, None
     
-    ###################################################################################
-    ###################################################################################
-
-    def render_piece_on_board(self, piece_dict):
-        """
-        Aplica uma peça rotacionada no tabuleiro e retorna a matriz resultante.
-        Útil para debug.
-        """
-        # fixed_area = self.get_fixed_gamearea() 
-        fixed_area = self.get_fixed_gamearea().astype(np.int32).copy()
-        rotation = piece_dict["rotation"].astype(np.int32)
-        # rotation = piece_dict["rotation"]
-        row = piece_dict["row"]
-        col = piece_dict["col"]
-
-        p_height, p_width = rotation.shape
-
-        # Cria uma cópia do tabuleiro resultante com a peça aplicada
-        board_with_piece = fixed_area.copy()
-        board_with_piece[row:row+p_height, col:col+p_width] += rotation
-
-        # Opcional: garantir que os valores fiquem em [0,1] (caso sobreposição acidental ocorra)
-        board_with_piece = np.clip(board_with_piece, 0, 1)
-
-        return board_with_piece
-
     ###################################################################################
     ###################################################################################
 
@@ -306,51 +272,224 @@ class TetrisEnv(gym.Env):
     ###################################################################################
 
     def get_all_pieces_positions(self):
+
+
         piece_shape = self.get_new_piece_shape()
         piece_rotations = self.get_all_rotations(piece = piece_shape)
         possible_positions = []
 
 
-        current_area = self.get_current_gamearea() 
-        board_height, board_width = current_area.shape
+        current_fixed_gamearea = self.get_fixed_gamearea().astype(int)
+        possible_positions,moves = self.generate_all_final_positions( piece_rotations=piece_rotations, board=current_fixed_gamearea)
 
-        for rotation in piece_rotations:
-            p_height, p_width = rotation.shape
-            for col in range(board_width - p_width + 1):  # evita sair pela direita
-                for row in range(board_height - p_height + 1):  # testa queda
-                    area_section = current_area[row:row+p_height, col:col+p_width]
-                    if np.any((area_section + rotation) > 1):  # colisão
-                        break  # peça não pode descer mais
-                final_row = row - 1  # última linha válida
-                if final_row >= 0:
-                    possible_positions.append({
-                        "rotation": rotation,
-                        "row": final_row,
-                        "col": col
-                    })
+        # self.possible_plays.append([possible_positions,moves])
 
-        return possible_positions
+        return possible_positions,moves
+    
+    ###################################################################################
+    ###################################################################################
+
+    def clear_full_lines(self,board: np.ndarray) -> np.ndarray:
+
+        """Remove linhas completas (todas as colunas == 1) e adiciona linhas vazias no topo."""
+        board_h, board_w = board.shape
+        # Mantém apenas as linhas que não estão completas
+        not_full_rows = [row for row in board if not np.all(row == 1)]
+        # Conta quantas linhas foram removidas
+        num_cleared = board_h - len(not_full_rows)
+        # Reconstroi o tabuleiro com linhas vazias no topo
+        new_board = np.vstack([np.zeros((num_cleared, board_w), dtype=np.uint8),
+                            np.array(not_full_rows, dtype=np.uint8)])
+        return new_board
+    
+    ###################################################################################
+    ###################################################################################
+
+    def generate_all_final_positions(self,
+        piece_rotations: list[np.ndarray], board: np.ndarray
+        ) -> Tuple[list[np.ndarray], list[Tuple[int, int]]]:
+        """
+        Gera todas as posições finais possíveis para uma peça,
+        considerando todas as rotações e colunas do tabuleiro.
+
+        Args:
+            piece_rotations: lista de np.ndarray (diferentes rotações da peça).
+            board: estado atual do tabuleiro (np.ndarray 2D com 0 = vazio, 1 = ocupado).
+
+        Returns:
+            results: lista de tabuleiros após cada posição final válida.
+            moves: lista de pares (rotacao, coluna) correspondentes a cada tabuleiro.
+        """
+        board_h, board_w = board.shape
+        results = []
+        moves = []
+
+        for rot_idx, piece in enumerate(piece_rotations):
+            ph, pw = piece.shape
+            
+            # percorre todas as colunas possíveis
+            for col in range(board_w - pw + 1):
+                row = 0
+
+                # descer a peça até colidir
+                while True:
+                    if row + ph > board_h:  
+                        break  # passou do fundo
+
+                    region = board[row:row+ph, col:col+pw]
+
+                    if np.any((region + piece) > 1):
+                        break  # colisão
+
+                    row += 1
+
+                final_row = row - 1
+                if final_row < 0:
+                    continue  # não coube no tabuleiro
+
+                new_board = board.copy()
+                new_board[final_row:final_row+ph, col:col+pw] += piece
+
+                new_board = self.clear_full_lines(new_board)
+                results.append(new_board)
+                moves.append((rot_idx, col))
+
+        return results, moves
+
+    ###################################################################################
+    ###################################################################################
+
+    def pad_results(self,
+        results: List[np.ndarray], 
+        moves: List[Tuple[int, int]], 
+        max_len: int = 40, 
+        board_shape: Tuple[int, int] = (18, 10)
+    ) -> Tuple[np.ndarray, List[Tuple[int, int]]]:
+        """
+        Ajusta os resultados para tamanho fixo (max_len).
+        Repete o último estado/movimento até completar.
+        """
+        n = len(results)
+
+        if n == 0:
+            # Nenhum estado válido -> devolve todos zeros
+            boards = np.zeros((max_len, *board_shape), dtype=np.uint8)
+            moves_out = [(0, 0)] * max_len
+            return boards, moves_out
+
+        # Empilha resultados em (n, H, W)
+        boards = np.stack(results, axis=0).astype(np.uint8)
+        moves_out = list(moves)
+
+        # Se precisar completar
+        if n < max_len:
+            last_board = boards[-1]
+            last_move = moves_out[-1]
+            pad_count = max_len - n
+
+            boards = np.concatenate(
+                [boards, np.repeat(last_board[None, :, :], pad_count, axis=0)],
+                axis=0
+            )
+            moves_out.extend([last_move] * pad_count)
+
+        elif n > max_len:
+            # Corta o excesso (nunca deveria passar de 40 no Tetris clássico)
+            boards = boards[:max_len]
+            moves_out = moves_out[:max_len]
+
+        return boards, moves_out
+
+    ###################################################################################
+    ###################################################################################
+
+    def calc_area_features(self, area:np.array)->np.array:
+        
+        old_fixed_gamearea = self.get_fixed_gamearea()
+
+        new_column_heights = self.get_column_heights(area = area)
+        new_max_height = max(new_column_heights)/18
+        new_mean_height = np.mean(new_column_heights)/18
+
+        old_column_heights = self.get_column_heights(area = old_fixed_gamearea)
+        old_max_height = max(old_column_heights)/18
+
+
+        clear_line = max(old_max_height-new_max_height,0)*18
+        
+            
+        bumpiness = self.calc_bumpiness(area = area)/180
+        # holes = self.count_holes(area = area)/180
+        holes = self.calc_hole_penalty(old_fixed_gamearea=old_fixed_gamearea, new_fixed_gamearea=area)/180
+        
+
+        clean_progress,_ = self.calc_cleaning_line_progress(old_fixed_gamearea=old_fixed_gamearea,
+                                                            new_fixed_gamearea=area)
+        clean_progress = clean_progress/10
+
+        
+
+        return np.array([new_max_height, new_mean_height, bumpiness, holes,clean_progress, clear_line])
+
+    ###################################################################################
+    ###################################################################################
+
+    def get_next_piece_array(self)->np.array:
+        next_piece_id =  self.pyboy.get_memory_value(0xC213) 
+        piece = self.memory_piece_map.get(str(next_piece_id), None)
+
+        one_hot = np.zeros(len(self.piece_order), dtype=np.float32)
+        if piece is not None and piece in self.piece_order:
+                idx = self.piece_order.index(piece)
+                one_hot[idx] = 1.0
+
+        return one_hot
+
+
+    def get_all_obs_features(self)->np.array:
+
+        obs_new, moves = self.get_all_pieces_positions()
+        obs_new_padded, moves_padded = self.pad_results(obs_new, moves, max_len=40, board_shape=(18,10))
+        
+        next_piece_vec = self.get_next_piece_array()
+        all_features = []
+
+        for area in obs_new_padded:
+            area_feature = self.calc_area_features(area=area)
+            feature_with_piece = np.concatenate([area_feature, next_piece_vec])
+            all_features.append(feature_with_piece)
+
+        self.possible_plays.append([obs_new_padded,moves_padded])
+    
+        return np.array(all_features, dtype=np.float32)
 
     ###################################################################################
     ###################################################################################
 
     def step(self, action):
         '''
-            self = TetrisEnv(window_type="SDL2", memory_size=50)
-            obs, _ = self.reset()
-            model = DQN.load("dqn_tetris_v15")
-            action, _ = model.predict(obs, deterministic=True)
+            self = TetrisEnv(window_type="headless", memory_size=50)
+            obs_feature, _ = self.reset()
+            model = DQN.load("dqn_tetris_v29")
+            action, _ = model.predict(obs_feature, deterministic=True)
         '''
 
-        
+
+        # print(self.pyboy.get_memory_value(0xC213))
+        # self.pyboy.screen_image()
+
         done = self.game_wrapper.game_over()
-        # Define ações compostas: mover até a coluna X com rotação Y
-        target_col = action // 4
-        num_rotations = action % 4
 
-        # print(f"Target column: {target_col}")
-        # print(f"Num of Rotations: {num_rotations}")
+        possible_plays = self.possible_plays[-1]
+        model_move = possible_plays[-1][action]
 
+
+
+        # model_move = moves_padded[action]
+
+        num_rotations = model_move[0]
+        target_col = model_move[1]
+        
 
         self.rotate_piece_to_target_position(num_rotations = num_rotations)
         self.move_piece_to_target_column(target_col= target_col)
@@ -365,31 +504,25 @@ class TetrisEnv(gym.Env):
             self.update_current_gamearea()
             self.update_current_fixed_gamearea()
             
-            area = self.game_wrapper.game_area()
-            
-            tiles = np.array(area)
-            obs = self.preprocess_game_area(tiles)
+            # area = self.game_wrapper.game_area()
+            # tiles = np.array(area)
+            # obs = self.preprocess_game_area(tiles)
+
+            obs_feature = self.get_all_obs_features()
+
             reward = self.calc_reward()
             
             self.step_count += 1
 
         else: 
 
-            area = self.game_wrapper.game_area()
-            tiles = np.array(area)
-            obs = self.preprocess_game_area(tiles)
+            obs_feature = self.get_all_obs_features()
             reward = -100
 
         if self.step_count > 1000:
             done = True
         
-        # print("Reward Applied:")
-        # for key, value in self.applied_rewards[-1].items():
-        #     print(f"  {key}: {value}")
-
-        # print(f"Total: {reward}")
-
-        return obs, reward, done, False, {}
+        return obs_feature, reward, done, False, {}
 
 
     
@@ -549,13 +682,13 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-    def calc_lower_pieces_reward(self) -> float:
+    def calc_lower_pieces_reward(self, old_fixed_gamearea:np.ndarray = None, new_fixed_gamearea:np.ndarray = None) -> float:
 
                # Verifica se tem mais de uma peça em jogo
         if len(self.fixed_gamearea_history) >= 2:
-            
-            old_fixed_gamearea = self.fixed_gamearea_history[-2]
-            new_fixed_gamearea = self.fixed_gamearea_history[-1] 
+            if old_fixed_gamearea is None or new_fixed_gamearea is None:
+                old_fixed_gamearea = self.fixed_gamearea_history[-2]
+                new_fixed_gamearea = self.fixed_gamearea_history[-1] 
             
             area = new_fixed_gamearea - old_fixed_gamearea
 
@@ -576,11 +709,7 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-    def calc_cleaning_line_progress_reward(self):
-        # Verifica se tem histórico suficiente
-        if len(self.fixed_gamearea_history) >= 2:
-            old_fixed_gamearea = self.fixed_gamearea_history[-2]
-            new_fixed_gamearea = self.fixed_gamearea_history[-1]
+    def calc_cleaning_line_progress(self, old_fixed_gamearea:np.ndarray = None, new_fixed_gamearea:np.ndarray = None):
 
             # Soma o número de blocos (1s) por linha
             old_line_counts = np.count_nonzero(old_fixed_gamearea, axis=1)
@@ -597,27 +726,44 @@ class TetrisEnv(gym.Env):
             positive_diffs = [diff for diff in relevant_diffs if diff > 0]
 
             # Conta o número de linhas que tiveram progresso
-            num_lines_with_progress = np.count_nonzero(positive_diffs)*0.25
+            num_lines_with_progress = np.count_nonzero(positive_diffs)
+
+            return num_lines_with_progress, positive_diffs
+
+    ###################################################################################
+    ###################################################################################
+
+    def calc_cleaning_line_progress_reward(self, old_fixed_gamearea:np.ndarray = None, new_fixed_gamearea:np.ndarray = None):
+                # Verifica se tem histórico suficiente
+        if len(self.fixed_gamearea_history) >= 2:
+
+            if old_fixed_gamearea is None or new_fixed_gamearea is None:
+                old_fixed_gamearea = self.fixed_gamearea_history[-2]
+                new_fixed_gamearea = self.fixed_gamearea_history[-1]
+
+            num_lines_with_progress, positive_diffs = self.calc_cleaning_line_progress(old_fixed_gamearea=old_fixed_gamearea, 
+                                                                                       new_fixed_gamearea=new_fixed_gamearea)
 
             # Calcula a recompensa total com peso progressivo
             weighted_reward = np.sum([np.log2(diff + 1) for diff in positive_diffs])
 
             # Combina os dois: número de linhas ativas e intensidade do progresso
             final_reward = num_lines_with_progress + weighted_reward
-
-            return final_reward
         else:
-            return 0.0
+            final_reward = 0
+
+        return final_reward
+
 
     ###################################################################################
     ###################################################################################
 
-    def calc_bumpiness_penalty(self):
+    def calc_bumpiness_penalty(self, old_fixed_gamearea:np.ndarray = None, new_fixed_gamearea:np.ndarray = None):
          # Verifica se tem mais de uma peça em jogo
         if len(self.fixed_gamearea_history) >= 2:
-            
-            old_fixed_gamearea = self.fixed_gamearea_history[-2]
-            new_fixed_gamearea = self.fixed_gamearea_history[-1]
+            if old_fixed_gamearea is None or new_fixed_gamearea is None:
+                old_fixed_gamearea = self.fixed_gamearea_history[-2]
+                new_fixed_gamearea = self.fixed_gamearea_history[-1]
 
             old_bumpiness = self.calc_bumpiness(area = old_fixed_gamearea)
             new_bumpiness = self.calc_bumpiness(area = new_fixed_gamearea)
@@ -633,7 +779,7 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-    def calc_height_penalty(self):
+    def calc_height_penalty(self, old_fixed_gamearea:np.ndarray = None, new_fixed_gamearea:np.ndarray = None):
         
         # Verifica se tem mais de uma peça em jogo
         if len(self.fixed_gamearea_history) >= 2:
@@ -647,7 +793,7 @@ class TetrisEnv(gym.Env):
 
             if max_height_after > max_height_before:
                 normalized_height = max_height_after / max_possible_height  # entre 0 e 1
-                height_penalty = - self.height_penalty(normalized_height)*4
+                height_penalty = - self.height_penalty(normalized_height)
 
             else:
                 height_penalty = 0
@@ -660,15 +806,16 @@ class TetrisEnv(gym.Env):
     ###################################################################################
     ###################################################################################
 
-    def calc_hole_penalty(self):
+    def calc_hole_penalty(self, old_fixed_gamearea:np.ndarray = None, new_fixed_gamearea:np.ndarray = None):
 
         # Verifica se tem mais de uma peça em jogo
         if len(self.fixed_gamearea_history) >= 2:
             
-            old_fixed_gamearea = self.fixed_gamearea_history[-2]
-            new_fixed_gamearea = self.fixed_gamearea_history[-1]   
+            if old_fixed_gamearea is None or new_fixed_gamearea is None:
+                old_fixed_gamearea = self.fixed_gamearea_history[-2]
+                new_fixed_gamearea = self.fixed_gamearea_history[-1]   
 
-         
+            
             holes_before = self.count_holes(area = old_fixed_gamearea)
             holes_after = self.count_holes(area = new_fixed_gamearea)
 
@@ -696,7 +843,7 @@ class TetrisEnv(gym.Env):
             score_reward = 0.0
 
         else:
-            score_reward = score_diff*10
+            score_reward = score_diff
 
         return score_reward
 
@@ -705,20 +852,23 @@ class TetrisEnv(gym.Env):
 
     def calc_reward(self):
 
+        
+
         # Atualiza a área de jogo
-        PENALTY_MULT = 0.6
+        HEIGHT_MULT = 0.6
+        HOLE_MULT = 0.36
+        BUMP_MULT = 0.18
+
         ## Penalidades
-        height_penalty = self.calc_height_penalty()*PENALTY_MULT
-        hole_penalty = self.calc_hole_penalty()
-        bumpiness_pentalty = min(self.calc_bumpiness_penalty(),1)*PENALTY_MULT
+        height_penalty = self.calc_height_penalty()*HEIGHT_MULT
+        hole_penalty = self.calc_hole_penalty()*HOLE_MULT
+        bumpiness_pentalty = -max(self.calc_bumpiness_penalty(),0)*BUMP_MULT
         penalty = hole_penalty + height_penalty + bumpiness_pentalty
 
         
-
         ## Rewards
         score_reward = self.calc_score_reward()
-        safe_reward = self.calc_lower_pieces_reward()*0.7
-
+        safe_reward = self.calc_lower_pieces_reward()*0.5
 
 
         if score_reward == 0:
@@ -729,14 +879,12 @@ class TetrisEnv(gym.Env):
             clean_line_progress_reward = 0
 
         # Sobreviver
-        survival_reward = 1
+        survival_reward = 0.1
    
         # Penalidades
         reward = score_reward + survival_reward + safe_reward + clean_line_progress_reward  
         
         total_reward = reward + penalty
-
-        total_reward = total_reward
 
         reward_dict = {
                         "hole_penalty":hole_penalty,

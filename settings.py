@@ -1,5 +1,5 @@
 import os
-from pyboy import WindowEvent
+from pyboy.utils import WindowEvent
 import numpy as np 
 
 
@@ -29,10 +29,21 @@ release_map = {
 
 piece_map = {'133':"T",
              "131":"Q",
+             "128":"IL",
              "129":"IL",
              "130":"H",
              "132":"L",
              "139":"I"}
+
+MEMORY_PIECE_MAP = {'24':"T",
+             "12":"Q",
+             "4":"IL",
+             "20":"S",
+             "0":"L",
+             "16":"Z",
+             "8":"I"}
+
+PIECE_ORDER = ["T", "Q", "IL", "S", "L", "Z", "I"]
 
 PIECES_SHAPES = {
     # Peça I (linha)
