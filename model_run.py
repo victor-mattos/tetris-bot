@@ -19,13 +19,13 @@ step_count = 0
 
 
 # env = TetrisEnv(window_type="SDL2", memory_size=50)
-env = TetrisEnv(window_type="headless", memory_size=50)
+env = TetrisEnv(window_type="SDL2", memory_size=50)
 print("\n[INFO] Reiniciando ambiente...")
 obs, _ = env.reset()
 
 # Carrega o modelo treinado
 # model = PPO.load("ppo_tetris")
-model = DQN.load("dqn_tetris_v29")
+model = DQN.load("dqn_1m_area_features")
 reward_sum = 0
 aux_list = []
 

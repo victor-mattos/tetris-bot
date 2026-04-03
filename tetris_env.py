@@ -25,13 +25,18 @@ class TetrisEnv(gym.Env):
         self.action_space = Discrete(10 * 4)  # 10 posições finais × 4 rotações
         # self.observation_space = Box(low=0.0, high=1.0, shape=(40,18, 10), dtype=np.float32)
 
+        # self.observation_space = Box(
+        #     low=-np.inf,
+        #     high=np.inf,
+        #     shape=(40, 13),
+        #     dtype=np.float32
+        # )
         self.observation_space = Box(
             low=-np.inf,
             high=np.inf,
-            shape=(40, 13),
+            shape=(40, 6),
             dtype=np.float32
         )
-
 
         self.window_type = window_type
         self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
@@ -456,8 +461,8 @@ class TetrisEnv(gym.Env):
 
         for area in obs_new_padded:
             area_feature = self.calc_area_features(area=area)
-            feature_with_piece = np.concatenate([area_feature, next_piece_vec])
-            all_features.append(feature_with_piece)
+            # feature_with_piece = np.concatenate([area_feature, next_piece_vec])
+            all_features.append(area_feature)
 
         self.possible_plays.append([obs_new_padded,moves_padded])
     
