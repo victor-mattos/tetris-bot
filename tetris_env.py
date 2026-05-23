@@ -5,7 +5,7 @@ import time
 import math
 import numpy as np
 
-from gymnasium.spaces import Discrete, Box
+from gymnasium.spaces import Discrete, Box, Dict
 from pyboy import PyBoy,WindowEvent
 # from pyboy.utils import WindowEvent
 from collections import deque
@@ -23,20 +23,22 @@ class TetrisEnv(gym.Env):
         # self.observation_space = Box(low=0.0, high=1.0, shape=(180,), dtype=np.float32)
 
         self.action_space = Discrete(10 * 4)  # 10 posições finais × 4 rotações
-        # self.observation_space = Box(low=0.0, high=1.0, shape=(40,18, 10), dtype=np.float32)
-
+        self.observation_space = Dict({
+                "board_features": Box(low=0, high=1, shape=(40, 6), dtype=np.float32),
+                "next_piece": Box(low=0, high=1, shape=(7,), dtype=np.float32)
+            })
         # self.observation_space = Box(
         #     low=-np.inf,
         #     high=np.inf,
         #     shape=(40, 13),
         #     dtype=np.float32
         # )
-        self.observation_space = Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(40, 6),
-            dtype=np.float32
-        )
+        # self.observation_space = Box(
+        #     low=-np.inf,
+        #     high=np.inf,
+        #     shape=(40, 6),
+        #     dtype=np.float32
+        # )
 
         self.window_type = window_type
         self.pyboy = PyBoy(ROM_PATH, window_type=self.window_type, game_wrapper=True, openai_gym=True)
@@ -420,12 +422,15 @@ class TetrisEnv(gym.Env):
         old_max_height = max(old_column_heights)/18
 
 
-        clear_line = max(old_max_height-new_max_height,0)*18
+        # clear_line = max(old_max_height-new_max_height,0)*18
+        linhas_limpas_brutas = max(old_max_height - new_max_height, 0) * 18.0
+        clear_line = min(linhas_limpas_brutas / 4.0, 1.0)
         
             
         bumpiness = self.calc_bumpiness(area = area)/180
-        # holes = self.count_holes(area = area)/180
-        holes = self.calc_hole_penalty(old_fixed_gamearea=old_fixed_gamearea, new_fixed_gamearea=area)/180
+        holes = self.count_holes(area = area)/180
+        # holes = self.calc_hole_penalty(old_fixed_gamearea=old_fixed_gamearea, new_fixed_gamearea=area)/180
+
         
 
         clean_progress,_ = self.calc_cleaning_line_progress(old_fixed_gamearea=old_fixed_gamearea,
@@ -450,6 +455,8 @@ class TetrisEnv(gym.Env):
 
         return one_hot
 
+    ###################################################################################
+    ###################################################################################
 
     def get_all_obs_features(self)->np.array:
 
@@ -463,10 +470,15 @@ class TetrisEnv(gym.Env):
             area_feature = self.calc_area_features(area=area)
             # feature_with_piece = np.concatenate([area_feature, next_piece_vec])
             all_features.append(area_feature)
+            # all_features.append(feature_with_piece)
 
         self.possible_plays.append([obs_new_padded,moves_padded])
     
-        return np.array(all_features, dtype=np.float32)
+        # return np.array(all_features, dtype=np.float32)
+        return {
+            "board_features": np.array(all_features, dtype=np.float32),
+            "next_piece": next_piece_vec
+        }   
 
     ###################################################################################
     ###################################################################################
@@ -475,7 +487,7 @@ class TetrisEnv(gym.Env):
         '''
             self = TetrisEnv(window_type="headless", memory_size=50)
             obs_feature, _ = self.reset()
-            model = DQN.load("dqn_tetris_v29")
+            model = DQN.load("models/2026-04-16/best/best_model")
             action, _ = model.predict(obs_feature, deterministic=True)
         '''
 
@@ -774,12 +786,13 @@ class TetrisEnv(gym.Env):
             new_bumpiness = self.calc_bumpiness(area = new_fixed_gamearea)
 
             delta_bumpiness = new_bumpiness - old_bumpiness 
-            bumpiness_penalty = -delta_bumpiness
-
+            # bumpiness_penalty = -delta_bumpiness
+            return delta_bumpiness
         else:
-            bumpiness_penalty = 0
+            # bumpiness_penalty = 0
+            return 0 
 
-        return bumpiness_penalty 
+        # return bumpiness_penalty 
 
     ###################################################################################
     ###################################################################################
@@ -848,7 +861,7 @@ class TetrisEnv(gym.Env):
             score_reward = 0.0
 
         else:
-            score_reward = score_diff
+            score_reward = score_diff/40
 
         return score_reward
 
@@ -861,14 +874,22 @@ class TetrisEnv(gym.Env):
 
         # Atualiza a área de jogo
         HEIGHT_MULT = 0.6
-        HOLE_MULT = 0.36
-        BUMP_MULT = 0.18
+        HOLE_MULT = 3
+        BUMP_MULT = 0.25
 
         ## Penalidades
         height_penalty = self.calc_height_penalty()*HEIGHT_MULT
         hole_penalty = self.calc_hole_penalty()*HOLE_MULT
-        bumpiness_pentalty = -max(self.calc_bumpiness_penalty(),0)*BUMP_MULT
-        penalty = hole_penalty + height_penalty + bumpiness_pentalty
+        # bumpiness_pentalty = -max(self.calc_bumpiness_penalty(),0)*BUMP_MULT
+
+        # Aplicação correta da penalidade de irregularidade (Bumpiness)
+        delta_bump = self.calc_bumpiness_penalty()
+        if delta_bump > 0:            
+            bumpiness_penalty = -delta_bump * BUMP_MULT
+        else:
+            bumpiness_penalty = 0.0
+
+        penalty = hole_penalty + height_penalty + bumpiness_penalty
 
         
         ## Rewards
@@ -894,7 +915,7 @@ class TetrisEnv(gym.Env):
         reward_dict = {
                         "hole_penalty":hole_penalty,
                        "height_penalty":height_penalty,
-                       "bumpiness_penalty":bumpiness_pentalty,
+                       "bumpiness_penalty":bumpiness_penalty,
                        "clean_line_progress_reward":clean_line_progress_reward,
                        "score_reward":score_reward,
                        "survival_reward":survival_reward,

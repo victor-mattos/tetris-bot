@@ -11,6 +11,9 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 # ---------------------------------------------------------
 # 1. CONFIGURAÇÃO DO AMBIENTE VETORIZADO E NORMALIZAÇÃO
 # ---------------------------------------------------------
+date_ref = "2026-04-21"
+model_save_path = os.path.join(os.getcwd(), f"models\\{date_ref}")
+
 print("\n[INFO] Inicializando ambiente base e vetorizado...")
 
 # Instanciação do ambiente base (onde vivem as funções do jogo)
@@ -20,7 +23,7 @@ raw_env = TetrisEnv(window_type="SDL2", memory_size=50)
 env = DummyVecEnv([lambda: raw_env])
 
 # Carregamento do normalizador exato utilizado no treinamento de 2M steps
-norm_path = "models/vecnorm_2m.pkl" 
+norm_path = f"{model_save_path}/vecnorm_2m.pkl" 
 env = VecNormalize.load(norm_path, env)
 
 # CRÍTICO: Desligar o treinamento do normalizador na inferência para evitar Data Leakage
@@ -31,7 +34,7 @@ env.norm_reward = False
 # 2. CARREGAMENTO DO MODELO
 # ---------------------------------------------------------
 print("\n[INFO] Carregando modelo DQN...")
-model = DQN.load("models/best/best_model")
+model = DQN.load(f"{model_save_path}/best/best_model")
 
 # ---------------------------------------------------------
 # 3. LOOP DE INFERÊNCIA
